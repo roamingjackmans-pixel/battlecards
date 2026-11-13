@@ -161,6 +161,8 @@ export class Duel extends Emitter {
   applyPhase(m) {
     if (this.over) return;
     this.deadline = now() + m.ms;
+    // a new shop or round always gets the screen back, even if a clash animation is somehow still up
+    if (m.ph === 'shop' || m.ph === 'battle') { this.closeClashOverlay(); this.lpLock = false; }
     if (m.ph === 'pick') { this.phase = 'pick'; this.showPick(); }
     else if (m.ph === 'battle') {
       if (m.r <= this.round && this.phase === 'battle') return;
@@ -651,7 +653,7 @@ export class Duel extends Emitter {
     return new Promise(res => {
       const t0 = performance.now();
       const f = t => {
-        const k = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - k, 3);
+        const k = clamp((t - t0) / ms, 0, 1), e = 1 - Math.pow(1 - k, 3);
         el.textContent = fmt(from + (to - from) * e);
         if (k < 1) frame(f); else res();
       };
@@ -887,8 +889,32 @@ export class Duel extends Emitter {
   }
 
   // ================================================================ the clash
+  /** The clash: the animation, then what happens next. If the animation ever fails, the overlay still goes
+   *  away and the duel carries on, so a glitch can never leave a player stuck behind it. */
   async playClash(m) {
     if (this.over) return;
+    try { await this._clashAnim(m); } catch (e) { console.error('clash animation failed', e); }
+    this.closeClashOverlay();
+    this.lpLock = false;
+    if (this.over) return;
+    if (!this.lastClash) { const me = this.isHost ? 'a' : 'b'; this.lastClash = { won: m.res.winner === me, lost: !!m.res.winner && m.res.winner !== me, out: {} }; }
+    if (this.run.lp <= 0 || this.opp.lp <= 0) {
+      const a = this.run.lp, b = this.opp.lp, rv = this.rival;
+      this.finish({ won: a > b, draw: a === b, note: a > b ? `${rv.name}'s Life Points hit zero!` : a === b ? 'Double knockout. Both of you are lying on the floor.' : 'Your Life Points hit zero. Your monsters need a nap.' });
+      return;
+    }
+    this.send({ t: 'cdone', r: this.round });
+    if (this.isHost) this.hostEvent('cdone', 'h', { r: this.round });
+    if (!this.isHost && this.phase === 'clash') { const pz = $('#play', this.root); pz.innerHTML = '<div class="msg">Shop opens in a moment…</div>'; }
+    this.renderSide();
+  }
+  closeClashOverlay() {
+    const ov = this.clashOv;
+    this.clashOv = null;
+    if (ov && ov.isConnected) FX.autoRemove(ov.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300 }), ov);
+  }
+  async _clashAnim(m) {
+    this.lastClash = null;
     this.phase = 'clash';
     this.lpLock = true;
     if (!this.run.done) { this.run.done = true; this.sentDone = this.round; }
@@ -922,6 +948,7 @@ export class Duel extends Emitter {
     const box = h('div.clash', L, R, LM, RM, mid, note);
     const ov = h('div.overlay.block', h('div.dim'), box);
     document.body.append(ov);
+    this.clashOv = ov;
     FX.setBgMood('battle');
     L.animate([{ transform: 'translateX(-60vw)' }, { transform: 'none' }], { duration: 450, easing: 'cubic-bezier(.2,1.3,.4,1)' });
     R.animate([{ transform: 'translateX(60vw)' }, { transform: 'none' }], { duration: 450, easing: 'cubic-bezier(.2,1.3,.4,1)' });
@@ -934,7 +961,7 @@ export class Duel extends Emitter {
     await new Promise(done => {
       let last = 0;
       const f = t => {
-        const k = Math.min(1, (t - t0) / dur), e = close ? 1 - Math.pow(1 - k, 1.6) : 1 - Math.pow(1 - k, 3);
+        const k = clamp((t - t0) / dur, 0, 1), e = close ? 1 - Math.pow(1 - k, 1.6) : 1 - Math.pow(1 - k, 3);
         la.textContent = fmt(myAtk * e); ra.textContent = fmt(theirAtk * e);
         const step = Math.floor(k * 24);
         if (step !== last) { last = step; sfx.chip(Math.min(15, step >> 1)); }
@@ -1006,24 +1033,13 @@ export class Duel extends Emitter {
       sideEl.querySelector('i.ghost').style.width = clamp(after / RULES.lp, 0, 1) * 100 + '%';
       const lv = sideEl.querySelector('.lpv');
       const t0 = performance.now();
-      await new Promise(done => { let k0 = -1; const f = t => { const k = Math.min(1, (t - t0) / 900); lv.textContent = fmt(Math.max(0, before - dmg * k)); const kk = Math.floor(k * 20); if (kk !== k0) { k0 = kk; sfx.lpTick(kk); } if (k < 1) frame(f); else done(); }; frame(f); });
+      await new Promise(done => { let k0 = -1; const f = t => { const k = clamp((t - t0) / 900, 0, 1); lv.textContent = fmt(Math.max(0, before - dmg * k)); const kk = Math.floor(k * 20); if (kk !== k0) { k0 = kk; sfx.lpTick(kk); } if (k < 1) frame(f); else done(); }; frame(f); });
     };
     await Promise.all([lpAnim(L, myLpBefore, res.dmg[me]), lpAnim(R, theirLpBefore, res.dmg[them])]);
     if (won) { sfx.victory(); FX.confetti(innerWidth * 0.25, innerHeight * 0.3, 50); }
     else if (lost) { sfx.fizzle(); }
     this.renderOpp();
     await sleep(1100);
-    FX.autoRemove(ov.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300 }), ov);
-    this.lpLock = false;
-    if (this.run.lp <= 0 || this.opp.lp <= 0) {
-      const a = this.run.lp, b = this.opp.lp;
-      this.finish({ won: a > b, draw: a === b, note: a > b ? `${rv.name}'s Life Points hit zero!` : a === b ? 'Double knockout. Both of you are lying on the floor.' : 'Your Life Points hit zero. Your monsters need a nap.' });
-      return;
-    }
-    this.send({ t: 'cdone', r: this.round });
-    if (this.isHost) this.hostEvent('cdone', 'h', { r: this.round });
-    if (!this.isHost && this.phase === 'clash') { const pz = $('#play', this.root); pz.innerHTML = '<div class="msg">Shop opens in a moment…</div>'; }
-    this.renderSide();
   }
 
   // ================================================================ shop

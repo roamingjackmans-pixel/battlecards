@@ -24,8 +24,9 @@ export function unlock() {
   if (ac.state === 'suspended') ac.resume();
 }
 
-function tone(freq, dur, { type = 'sine', vol = 0.3, at = 0, slide = 0, attack = 0.005, bus = sfxBus, detune = 0 } = {}) {
-  if (!ac || !bus) return;
+function tone(freq, dur, opts) { try { tone_(freq, dur, opts); } catch (e) { console.warn('sfx', e); } }
+function tone_(freq, dur, { type = 'sine', vol = 0.3, at = 0, slide = 0, attack = 0.005, bus = sfxBus, detune = 0 } = {}) {
+  if (!ac || !bus || !isFinite(freq) || !isFinite(dur) || freq <= 0) return;
   const t0 = ac.currentTime + at;
   const o = ac.createOscillator(), g = ac.createGain();
   o.type = type; o.frequency.setValueAtTime(freq, t0); o.detune.value = detune;
@@ -37,8 +38,9 @@ function tone(freq, dur, { type = 'sine', vol = 0.3, at = 0, slide = 0, attack =
   o.start(t0); o.stop(t0 + dur + 0.05);
 }
 let noiseBuf = null;
-function noise(dur, { vol = 0.2, at = 0, freq = 1200, q = 1, type = 'bandpass', attack = 0.005, sweep = 0, bus = sfxBus } = {}) {
-  if (!ac || !bus) return;
+function noise(dur, opts) { try { noise_(dur, opts); } catch (e) { console.warn('sfx', e); } }
+function noise_(dur, { vol = 0.2, at = 0, freq = 1200, q = 1, type = 'bandpass', attack = 0.005, sweep = 0, bus = sfxBus } = {}) {
+  if (!ac || !bus || !isFinite(dur) || !isFinite(freq)) return;
   if (!noiseBuf) {
     noiseBuf = ac.createBuffer(1, ac.sampleRate * 1.5, ac.sampleRate);
     const d = noiseBuf.getChannelData(0);
@@ -57,6 +59,8 @@ function noise(dur, { vol = 0.2, at = 0, freq = 1200, q = 1, type = 'bandpass', 
 }
 const semi = (base, n) => base * Math.pow(2, n / 12);
 const SCALE = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24, 26, 28, 31, 33, 36];
+/** The n-th note up the scale; any n (negative, fractional, huge) gives a real note. */
+const sc = n => SCALE[Math.max(0, Math.min(SCALE.length - 1, Math.floor(+n) || 0))];
 
 export const sfx = {
   click() { tone(700, 0.05, { type: 'triangle', vol: 0.12 }); },
@@ -66,9 +70,9 @@ export const sfx = {
   deal(i = 0) { noise(0.06, { vol: 0.12, freq: 3000 + i * 200, q: 0.8, at: i * 0.045 }); },
   swoosh() { noise(0.22, { vol: 0.16, freq: 600, sweep: 6, q: 1.2 }); },
   /** n-th step in a scoring sequence: higher and brighter as the combo builds. */
-  chip(n) { const f = semi(330, SCALE[Math.min(n, SCALE.length - 1)]); tone(f, 0.12, { type: 'square', vol: 0.07 }); tone(f * 2, 0.08, { type: 'sine', vol: 0.08 }); },
-  mult(n) { const f = semi(440, SCALE[Math.min(n, SCALE.length - 1)]); tone(f, 0.16, { type: 'sawtooth', vol: 0.06 }); tone(f * 1.5, 0.12, { type: 'triangle', vol: 0.08, at: 0.02 }); },
-  xmult(n) { const f = semi(220, SCALE[Math.min(n, SCALE.length - 1)]); tone(f, 0.35, { type: 'sawtooth', vol: 0.1, slide: 2 }); tone(f * 2, 0.3, { type: 'square', vol: 0.05, at: 0.03, slide: 2 }); noise(0.2, { vol: 0.1, freq: 5000, q: 3 }); },
+  chip(n) { const f = semi(330, sc(n)); tone(f, 0.12, { type: 'square', vol: 0.07 }); tone(f * 2, 0.08, { type: 'sine', vol: 0.08 }); },
+  mult(n) { const f = semi(440, sc(n)); tone(f, 0.16, { type: 'sawtooth', vol: 0.06 }); tone(f * 1.5, 0.12, { type: 'triangle', vol: 0.08, at: 0.02 }); },
+  xmult(n) { const f = semi(220, sc(n)); tone(f, 0.35, { type: 'sawtooth', vol: 0.1, slide: 2 }); tone(f * 2, 0.3, { type: 'square', vol: 0.05, at: 0.03, slide: 2 }); noise(0.2, { vol: 0.1, freq: 5000, q: 3 }); },
   money() { tone(1320, 0.08, { type: 'square', vol: 0.06 }); tone(1760, 0.14, { type: 'square', vol: 0.06, at: 0.07 }); },
   total(big = 0) {
     tone(110, 0.5 + big * 0.2, { type: 'sawtooth', vol: 0.18, slide: 0.5 });
