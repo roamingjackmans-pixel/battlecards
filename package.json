@@ -1,0 +1,12 @@
+{
+  "name": "battlecards",
+  "version": "1.0.0",
+  "description": "Battle Cards: a two-player poker-hand monster duel. Build hands, summon monsters, send gremlins, shred your rival's cards.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node tools/serve.mjs",
+    "test": "node tools/test.mjs"
+  },
+  "engines": { "node": ">=18" }
+}
