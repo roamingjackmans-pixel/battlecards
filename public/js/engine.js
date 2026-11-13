@@ -320,8 +320,8 @@ export function applyGremlin(run, gid) {
       break;
     }
     case 'raccoon': {
-      const s = Math.min(3, Math.max(0, run.gold));
-      run.gold -= s; r.stolen = s; r.msg = s ? `The raccoon took $${s}!` : 'The raccoon found nothing. It\'s disappointed in you.';
+      if (run.discards > 0) { run.discards--; r.msg = 'The raccoon ran off with one of your discards!'; }
+      else r.msg = 'The raccoon found no discards to steal. It\'s disappointed in you.';
       break;
     }
     case 'muncher': run.muncher++; r.msg = 'Your next hand gets half Mult!'; break;

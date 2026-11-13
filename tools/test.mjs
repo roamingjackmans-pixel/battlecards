@@ -86,7 +86,8 @@ test('passives: clown car, napper, ernie', () => {
 });
 test('gremlins', () => {
   const run = E.newRun(7); E.startRound(run, 1, null); run.gold = 10;
-  assert.equal(E.applyGremlin(run, 'raccoon').stolen, 3); assert.equal(run.gold, 7);
+  assert.equal(E.applyGremlin(run, 'raccoon').res, 'hit'); assert.equal(run.discards, 2); assert.equal(run.gold, 10);
+  run.discards = 0; E.applyGremlin(run, 'raccoon'); assert.equal(run.discards, 0);
   const deck = run.deck.length;
   E.applyGremlin(run, 'chomper'); assert.equal(run.deck.length, deck - 1); assert.equal(run.hand.length, 8);
   E.applyGremlin(run, 'bat'); assert.equal(run.hand.filter(c => c.down).length, 3);

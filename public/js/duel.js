@@ -803,10 +803,10 @@ export class Duel extends Emitter {
     if (this.phase !== 'battle' || this.run.done) { this.send({ t: 'gremr', id: m.id, res: 'miss' }); return; }
     this.busy = true;
     const res = E.applyGremlin(this.run, m.g);
-    this.send({ t: 'gremr', id: m.id, res: res.res, stolen: res.stolen || 0, by: res.by, msg: res.msg });
+    this.send({ t: 'gremr', id: m.id, res: res.res, by: res.by, msg: res.msg });
     sfx.squeak();
     const from = FX.centerOf($('#oppav', this.root) || this.root);
-    const targetEl = res.cards && res.cards.length ? this.cardEls.get(res.cards[0]) : (m.g === 'raccoon' ? $('#gold', this.root) : m.g === 'muncher' ? $('#mult', this.root) : $('#handsn', this.root));
+    const targetEl = res.cards && res.cards.length ? this.cardEls.get(res.cards[0]) : (m.g === 'raccoon' ? $('#discn', this.root) : m.g === 'muncher' ? $('#mult', this.root) : $('#handsn', this.root));
     const to = targetEl ? FX.centerOf(targetEl) : [innerWidth / 2, innerHeight * 0.65];
     if (res.res !== 'hit') {
       await this.runner(g.art, from, [innerWidth / 2, innerHeight * 0.45], 600);
@@ -833,7 +833,7 @@ export class Duel extends Emitter {
         sfx.splat(); FX.textPop(x, y - 30, hit, '#b6e35a', 44);
         for (const u of res.cards) { const el = this.cardEls.get(u); if (el) this.paintCard(el, this.run.hand.find(x => x.uid === u)); }
       } else if (m.g === 'raccoon') {
-        sfx.money(); FX.textPop(x, y - 30, hit, '#ffd43b', 44); if (res.stolen) FX.floatAt($('#gold', this.root), `-$${res.stolen}`, 'g');
+        sfx.squeak(); FX.textPop(x, y - 30, hit, '#ffd43b', 44); FX.floatAt($('#discn', this.root), '-1 discard', 'm');
       } else { sfx.chomp(); FX.textPop(x, y - 30, hit, '#ff9ac0', 44); FX.shake(1); }
       toast(`<b>${g.name}!</b> ${res.msg}`, { ms: 2600, av: g.art });
       FX.shake(0.8, 250);
@@ -867,7 +867,6 @@ export class Duel extends Emitter {
     const g = GREM_BY_ID[gid]; if (!g) return;
     const el = $('#oppav', this.root);
     if (m.res === 'hit') {
-      if (m.stolen) { this.run.gold += m.stolen; FX.floatAt($('#gold', this.root), `+$${m.stolen} yoink`, 'g'); sfx.money(); }
       el && FX.floatAt(el, 'HIT!', 'm');
       this.run.stats.hits = (this.run.stats.hits || 0) + 1;
     } else if (m.res === 'blocked') { el && FX.floatAt(el, m.by === 'zapper' ? 'ZAPPED' : 'BLOCKED', 'k'); sfx.bonk(); }
@@ -1347,7 +1346,7 @@ export class BotLink extends Emitter {
       }
     }
     if (m.t === 'clash') { E.applyClash(r, m.res, 'b'); setTimeout(() => this.out({ t: 'cdone', r: m.r }), 7000); }
-    if (m.t === 'grem') { const res = E.applyGremlin(r, m.g); this.out({ t: 'gremr', id: m.id, res: res.res, stolen: res.stolen || 0, by: res.by }); }
+    if (m.t === 'grem') { const res = E.applyGremlin(r, m.g); this.out({ t: 'gremr', id: m.id, res: res.res, by: res.by }); }
     if (m.t === 'emote') setTimeout(() => this.out({ t: 'emote', e: 'lol' }), 800);
     if (m.t === 'rematch') this.out({ t: 'rematch' });
   }

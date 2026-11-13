@@ -453,7 +453,7 @@ function rulesModal() {
       <h4>✨ Spells, tomes and traps</h4>
       <ul><li><b>Tomes</b> level up a poker hand. <b>Spells</b> change cards in your hand (select the cards first). <b>Traps</b> are set face down and spring on your rival.</li></ul>
       <h4>😈 The Gremlin Gate</h4>
-      <ul><li>During a round, spend gold to send gremlins at your rival: shred their cards, ink them face down, glue them, steal their gold or a whole hand.</li>
+      <ul><li>During a round, spend gold to send gremlins at your rival: shred their cards, ink them face down, glue them, steal a discard or a whole hand.</li>
       <li>Every gremlin you send also raises your <b>eco</b>: extra gold every round. Spend now, earn later.</li>
       <li>Finished early? Your rival isn't. Gremlin time.</li></ul>
       <h4>💰 Gold</h4>

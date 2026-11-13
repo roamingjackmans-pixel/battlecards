@@ -65,7 +65,7 @@ Legendaries only come from packs: Destiny Dragon, Goblin King Grub (your gremlin
 | Shredder Rat | $2 | +0.5 | 6 s | Shreds a random card in their hand |
 | Ink Bat | $3 | +0.75 | 8 s | Flips 3 of their cards face down |
 | Glue Snail | $3 | +0.75 | 8 s | Glues 2 cards (can't discard) |
-| Tax Raccoon | $4 | +1 | 12 s | Steals up to $3, for you |
+| Bandit Raccoon | $4 | +1 | 12 s | Steals one of their discards |
 | Mult Muncher | $5 | +1.25 | 12 s | Their next hand scores half Mult |
 | Big Chomper | $7 | +2 | 18 s | Eats a card in their hand forever |
 | Hand Hog | $8 | +2 | 25 s | Steals one of their hands (once a round) |
