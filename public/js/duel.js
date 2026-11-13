@@ -160,6 +160,10 @@ export class Duel extends Emitter {
   // ================================================================ phases (both sides)
   applyPhase(m) {
     if (this.over) return;
+    // phases only move forward: a late, re-sent message for an earlier phase is ignored
+    const key = m.ph === 'pick' ? 0 : m.r * 3 + (m.ph === 'battle' ? 1 : 2);
+    if (key < (this.phaseKey || 0) || (key === this.phaseKey && m.ph !== 'pick')) return;
+    this.phaseKey = key;
     this.deadline = now() + m.ms;
     // a new shop or round always gets the screen back, even if a clash animation is somehow still up
     if (m.ph === 'shop' || m.ph === 'battle') { this.closeClashOverlay(); this.lpLock = false; }
@@ -1060,6 +1064,7 @@ export class Duel extends Emitter {
     if (g) { FX.floatAt(g, `+$${inc.total}`, 'g'); const [x, y] = FX.centerOf(g); FX.sparks(x, y, 16); }
   }
   renderShop(first = false) {
+    if (this.phase !== 'shop') return;   // never draw the mart over a round that has started
     const pz = $('#play', this.root); if (!pz) return;
     const r = this.run, s = r.shop;
     pz.innerHTML = '';
@@ -1162,10 +1167,11 @@ export class Duel extends Emitter {
     this.myReady = true;
     closePop();
     $$('.modal-bg').forEach(m => m.remove());
+    if (!auto) sfx.chime();
+    // draw the READY ✔ shop first: if we're the host and the last to be ready, the next line starts the round
+    this.renderShop();
     this.send({ t: 'ready', r: this.round });
     if (this.isHost) this.hostEvent('ready', 'h', { r: this.round });
-    if (!auto) sfx.chime();
-    this.renderShop();
   }
 
   // ================================================================ monster & item menus
