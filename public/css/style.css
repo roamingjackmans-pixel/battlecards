@@ -395,8 +395,9 @@ b.c, b.m, b.x, b.g { font-weight: 700; }
 .tornhalf { position: fixed; z-index: 66; pointer-events: none; }
 .heart-ov .rays { position: absolute; inset: -50%; background: repeating-conic-gradient(from 0deg, rgba(255, 220, 120, .35) 0 10deg, transparent 10deg 20deg); animation: spin 6s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.heart-ov .htext { position: relative; font-family: Bangers; font-size: clamp(36px, 7vw, 86px); text-align: center; color: #fff6d0; -webkit-text-stroke: 3px #8a3a00; paint-order: stroke fill; text-shadow: 0 0 30px #ffb300, 0 6px 0 #8a3a00; line-height: 1; padding: 20px; }
-.heart-ov .htext span { display: inline-block; animation: letterIn .5s cubic-bezier(.2,1.6,.4,1) both; }
+.heart-ov .htext { position: relative; max-width: 92vw; font-family: Bangers; font-size: clamp(34px, 6.5vw, 86px); text-align: center; color: #fff6d0; -webkit-text-stroke: 3px #8a3a00; paint-order: stroke fill; text-shadow: 0 0 30px #ffb300, 0 6px 0 #8a3a00; line-height: 1; padding: 20px; }
+.heart-ov .htext .hw { display: inline-block; white-space: nowrap; animation: none; }
+.heart-ov .htext .hw span { display: inline-block; animation: letterIn .5s cubic-bezier(.2,1.6,.4,1) both; }
 @keyframes letterIn { from { transform: translateY(40px) scale(.3) rotate(-30deg); opacity: 0; } }
 .runner { position: fixed; z-index: 64; width: 70px; height: 70px; pointer-events: none; }
 .ink { position: absolute; inset: -6px; background: radial-gradient(circle at 40% 40%, #1a1030 0 40%, transparent 41%), radial-gradient(circle at 70% 60%, #1a1030 0 25%, transparent 26%), radial-gradient(circle at 30% 75%, #1a1030 0 18%, transparent 19%); pointer-events: none; z-index: 3; }
@@ -485,3 +486,35 @@ b.c, b.m, b.x, b.g { font-weight: 700; }
 .pcard .pc-lift { transition: transform .15s; }
 .pcard.sel .pc-front { box-shadow: 0 0 0 3px #fff, 0 0 20px 6px rgba(255, 207, 58, .85); }
 .pcard.sel .pc-sway { animation-duration: 1.4s; }
+
+/* phones: everything has to fit one screen, because hand cards are positioned against the screen */
+@media (max-width: 900px) {
+  .board { min-height: 0; overflow: hidden; gap: 4px; }
+  .zones { flex-wrap: nowrap; }
+  .zones .mrow { flex: 1 1 auto; gap: 4px; }
+  .zones .mrow .mon { --mw: min(15vw, 64px); }
+  .zones .irow { gap: 4px; flex: none; }
+  .zones .irow .item { width: min(9vw, 40px); height: min(12vw, 52px); padding: 2px; }
+  .zones .irow .item .in { display: none; }
+  .zones .irow .item .ie { font-size: min(6vw, 24px); }
+  .zones .irow .item.empty:nth-child(n+2) { display: none; }
+  .playzone { min-height: calc(var(--ch) + 6px); }
+  .handzone { height: calc(var(--ch) + 34px); }
+  .hand-hint { display: none; }
+  .actions { gap: 6px; }
+  .actions .btn.big { font-size: 17px; padding: 10px 18px; }
+  .actions .btn { font-size: 14px; padding: 8px 12px; }
+  .side .vsline, .side .scorebox .lbl, .side .roundbox > div > div:last-child { display: none; }
+  .side .handname .hn { font-size: 20px; }
+  .side .counts .n { font-size: 20px; }
+  .side .goldnum { font-size: 24px; }
+  .side .heartbtn { padding: 5px; font-size: 13px; }
+  .opp .oname { font-size: 15px; }
+  .opp .oatk .num { font-size: 22px; }
+  .opp .lpbox .lpnum { font-size: 20px; }
+  .shop .offer { width: 46vw; max-width: 160px; }
+  .shop .offer .oart { width: 70px; height: 70px; }
+  .shop .offer .oemo { font-size: 44px; line-height: 70px; height: 70px; }
+  .pack { width: 104px; height: 140px; }
+  .clash .cl-side { top: 6%; }
+}

@@ -404,7 +404,9 @@ export class Duel extends Emitter {
     const hz = $('#handzone', this.root); if (!hz) return;
     const R = hz.getBoundingClientRect();
     const cw = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cw')) || 80;
-    const sample = this.cardEls.values().next().value;
+    const hand0 = skip ? this.run.hand.filter(c => !skip.has(c.uid)) : this.run.hand;
+    if (hand0.length) this.cardEl(hand0[0]);
+    const sample = hand0.length ? this.cardEls.get(hand0[0].uid) : null;
     const realW = sample ? sample.offsetWidth : cw;
     const realH = sample ? sample.offsetHeight : cw * 1.4;
     const hand = skip ? this.run.hand.filter(c => !skip.has(c.uid)) : this.run.hand;
@@ -484,7 +486,7 @@ export class Duel extends Emitter {
     FX.shout('SHUFFLE UP!', { color: '#ffd43b', size: 100 });
     sfx.deal(0); sfx.deal(1); sfx.deal(2);
     await sleep(900);
-    ov.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300 }).onfinish = () => ov.remove();
+    FX.autoRemove(ov.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300 }), ov);
   }
   showPick() {
     const pz = $('#play', this.root);
@@ -564,6 +566,7 @@ export class Duel extends Emitter {
     if (res.err) { toast(res.err); return; }
     this.renderActions();
     this.layoutHand(new Set(res.drawn.map(c => c.uid)));
+    { const hn = $('#handsn', this.root); if (hn) hn.textContent = this.run.hands; const g = $('#gold', this.root); if (g) g.textContent = '$' + this.run.gold; }
     await sleep(380);
     // reveal any face-down cards
     for (const u of uids) { const el = this.cardEls.get(u); el && el.classList.remove('down'); }
@@ -731,7 +734,8 @@ export class Duel extends Emitter {
     const ov = h('div.overlay.heart-ov', h('div.dim'), h('div.rays'), h('div.htext'));
     const words = 'BELIEVE IN THE HEART OF THE CARDS!';
     const ht = ov.querySelector('.htext');
-    [...words].forEach((ch, i) => ht.append(h('span', { style: { animationDelay: (i * 0.04) + 's' } }, ch === ' ' ? ' ' : ch)));
+    let li = 0;
+    words.split(' ').forEach((w, wi) => { const g = h('span.hw'); for (const ch of w) g.append(h('span', { style: { animationDelay: (li++ * 0.04) + 's' } }, ch)); ht.append(g); if (wi < words.split(' ').length - 1) ht.append(' '); });
     document.body.append(ov);
     FX.setBgMood('heart'); sfx.heart();
     for (const el of this.cardEls.values()) { el.style.transition = 'transform .5s ease-in'; el.style.transform += ' translateY(-60vh) rotate(180deg)'; }
@@ -739,7 +743,7 @@ export class Duel extends Emitter {
     FX.flash('#fff6c0', 500);
     this.clearCards();
     this.sel = new Set(res.best);
-    ov.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 400 }).onfinish = () => ov.remove();
+    FX.autoRemove(ov.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 400 }), ov);
     this.layoutHand();
     await sleep(700);
     for (const u of res.best) { const el = this.cardEls.get(u); if (el) { el.classList.add('sel'); const [x, y] = FX.centerOf(el); FX.sparks(x, y, 12, '#ffd43b'); } }
@@ -784,7 +788,7 @@ export class Duel extends Emitter {
       { transform: `translate(${midX - 35}px, ${midY - 35}px) scale(1.1) rotate(${spin ? 360 : -15}deg)` },
       { transform: `translate(${to[0] - 35}px, ${to[1] - 35}px) scale(1) rotate(${spin ? 720 : 0}deg)` },
     ], { duration: ms, easing: 'ease-in-out', fill: 'forwards' });
-    return new Promise(res => { a.onfinish = () => { res(r); setTimeout(() => r.remove(), 60); }; });
+    return FX.animDone(a).then(() => { setTimeout(() => r.remove(), 60); return r; });
   }
   drainGrem() {
     if (this.busy || !this.gremQ.length) return;
@@ -846,7 +850,7 @@ export class Duel extends Emitter {
       c.className = el.className + ' tornhalf';
       Object.assign(c.style, { left: r.left + 'px', top: r.top + 'px', transform: 'none', transition: 'none', clipPath: clip, width: r.width + 'px', height: r.height + 'px', zIndex: 66 });
       document.body.append(c);
-      c.animate([{ transform: 'translate(0,0) rotate(0)' }, { transform: `translate(${dir * 90}px, ${160 + Math.random() * 80}px) rotate(${dir * 50}deg)`, opacity: 0 }], { duration: 900, easing: 'cubic-bezier(.3,0,.8,.5)', fill: 'forwards' }).onfinish = () => c.remove();
+      FX.autoRemove(c.animate([{ transform: 'translate(0,0) rotate(0)' }, { transform: `translate(${dir * 90}px, ${160 + Math.random() * 80}px) rotate(${dir * 50}deg)`, opacity: 0 }], { duration: 900, easing: 'cubic-bezier(.3,0,.8,.5)', fill: 'forwards' }), c);
     };
     mk('polygon(0 0, 55% 0, 40% 20%, 58% 40%, 38% 60%, 55% 80%, 42% 100%, 0 100%)', -1);
     mk('polygon(55% 0, 100% 0, 100% 100%, 42% 100%, 55% 80%, 38% 60%, 58% 40%, 40% 20%)', 1);
@@ -1009,7 +1013,7 @@ export class Duel extends Emitter {
     else if (lost) { sfx.fizzle(); }
     this.renderOpp();
     await sleep(1100);
-    ov.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300 }).onfinish = () => ov.remove();
+    FX.autoRemove(ov.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300 }), ov);
     this.lpLock = false;
     if (this.run.lp <= 0 || this.opp.lp <= 0) {
       const a = this.run.lp, b = this.opp.lp;
@@ -1256,7 +1260,7 @@ export class Duel extends Emitter {
     if (mine) b.style.top = Math.max(10, r.bottom - 60) + 'px';
     b.style.position = 'fixed';
     document.body.append(b);
-    b.animate([{ transform: 'scale(.3)', opacity: 0 }, { transform: 'scale(1.1)', opacity: 1, offset: 0.15 }, { transform: 'scale(1)', opacity: 1, offset: 0.85 }, { transform: 'scale(.9)', opacity: 0 }], { duration: 2800 }).onfinish = () => b.remove();
+    FX.autoRemove(b.animate([{ transform: 'scale(.3)', opacity: 0 }, { transform: 'scale(1.1)', opacity: 1, offset: 0.15 }, { transform: 'scale(1)', opacity: 1, offset: 0.85 }, { transform: 'scale(.9)', opacity: 0 }], { duration: 2800 }), b);
   }
   confirmLeave() {
     modal((m, close) => {

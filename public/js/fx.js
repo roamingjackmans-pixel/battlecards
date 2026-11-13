@@ -139,19 +139,19 @@ export function shake(power = 1, ms = 300) {
 export function flash(color = '#fff', ms = 250) {
   const el = h('div.flash', { style: { background: color } });
   document.body.append(el);
-  el.animate([{ opacity: 0.8 }, { opacity: 0 }], { duration: ms, easing: 'ease-out' }).onfinish = () => el.remove();
+  autoRemove(el.animate([{ opacity: 0.8 }, { opacity: 0 }], { duration: ms, easing: 'ease-out' }), el);
 }
 /** A big comic shout across the screen ("CHOMP!", "CLASH!"). */
 export function shout(text, { color = '#ffd43b', size = 90, ms = 1100, sub = '', tilt = -6, cls = '' } = {}) {
   const el = h('div.shout' + (cls ? '.' + cls : ''), { style: { '--c': color, '--s': size + 'px', '--tilt': tilt + 'deg' } }, h('span.shout-main', text), sub ? h('span.shout-sub', sub) : null);
   document.body.append(el);
-  el.animate([
+  autoRemove(el.animate([
     { transform: `translate(-50%,-50%) scale(.2) rotate(${tilt * 3}deg)`, opacity: 0 },
     { transform: `translate(-50%,-50%) scale(1.15) rotate(${tilt}deg)`, opacity: 1, offset: 0.15 },
     { transform: `translate(-50%,-50%) scale(1) rotate(${tilt}deg)`, opacity: 1, offset: 0.25 },
     { transform: `translate(-50%,-50%) scale(1.03) rotate(${tilt}deg)`, opacity: 1, offset: 0.8 },
     { transform: `translate(-50%,-50%) scale(1.4) rotate(${tilt}deg)`, opacity: 0 },
-  ], { duration: ms, easing: 'ease-out' }).onfinish = () => el.remove();
+  ], { duration: ms, easing: 'ease-out' }), el);
   return el;
 }
 /** A floating label above an element ("+4 Mult"). */
@@ -162,12 +162,12 @@ export function floatAt(el, text, cls = '') {
   f.style.left = (r.left + r.width / 2) + 'px';
   f.style.top = (r.top + 6) + 'px';
   document.body.append(f);
-  f.animate([
+  autoRemove(f.animate([
     { transform: 'translate(-50%, 0) scale(.4)', opacity: 0 },
     { transform: 'translate(-50%, -22px) scale(1.25)', opacity: 1, offset: 0.2 },
     { transform: 'translate(-50%, -34px) scale(1)', opacity: 1, offset: 0.7 },
     { transform: 'translate(-50%, -48px) scale(.9)', opacity: 0 },
-  ], { duration: 900, easing: 'ease-out' }).onfinish = () => f.remove();
+  ], { duration: 900, easing: 'ease-out' }), f);
 }
 export function centerOf(el) { const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }
 /** Bounce an element (a monster that just triggered, a card that scored). */
@@ -181,3 +181,20 @@ export function jiggle(el, power = 1) {
   ], { duration: 260, easing: 'ease-out', composite: 'add' });
 }
 export const fxReduce = reduce;
+
+/** When an animation ends, remove the element. Falls back to a timer so it happens even if the animation
+ *  timeline is paused (background tab), so a leftover overlay can never block the game. */
+export function autoRemove(anim, el) {
+  const t = anim.effect ? anim.effect.getTiming() : {};
+  const ms = (+t.duration || 0) + (+t.delay || 0) + 250;
+  let done = false;
+  const go = () => { if (done) return; done = true; el.remove(); };
+  anim.onfinish = go;
+  setTimeout(go, ms);
+}
+/** Resolves when the animation finishes, or after its duration anyway. */
+export function animDone(anim) {
+  const t = anim.effect ? anim.effect.getTiming() : {};
+  const ms = (+t.duration || 0) + (+t.delay || 0) + 150;
+  return Promise.race([anim.finished.catch(() => { }), new Promise(r => setTimeout(r, ms))]);
+}
