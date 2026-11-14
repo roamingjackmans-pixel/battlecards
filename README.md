@@ -15,8 +15,31 @@ Two players only. There is no single-player mode.
 
 - **Find a rival:** **Quick Duel** (anyone else searching right now), **Make a duel room** (share the 5-number
   code or the invite link, `?room=CODE`), or **⚔️ challenge a friend** who is online. They get a pop-up invite.
+- **The lobby (rooms and friend challenges):** the host picks the house rules, even before anyone joins, and
+  the guest watches them change live, then readies up; the host starts the duel. The host's last rules are
+  remembered. After a duel the host can hit **⚙️ Change rules** to go back to the lobby with the same rival.
+  Quick Duel skips the lobby and plays the standard rules. The lobby estimates rounds and minutes from bot
+  duels (`estimate` in `rules.js`, checked by `tools/test.mjs`).
+  - **Starting Life Points:** 2,000 / 3,000 / **4,000** / 6,000 / 8,000
+  - **Time per round:** 45 / 60 / **90** / 120 / 150 s battle (shop 25 / 30 / **40** / 50 / 55 s)
+  - **Modifiers** (any mix, plus 🎲 Surprise me, 🤪 ALL OF THEM and ↺ Standard):
+
+    | | Modifier | Effect |
+    |---|---|---|
+    | 💸 | Money Rain | Start with $12, +$3 extra every shop |
+    | 👹 | Gremlin Frenzy | Gremlins cost $1 less (min $1) and cool down twice as fast |
+    | 💥 | Glass Cannons | All clash damage ×2 |
+    | 🖐️ | Big Hands | Hand size 10 instead of 8 |
+    | 💖 | Heart Overdrive | Heart of the Cards fills twice as fast |
+    | 🧻 | Shredder Party | Losing a clash shreds 3 cards instead of 1 (decks never go below 30) |
+    | 👑 | Boss Rush | Every round is a boss round (×1.5 damage, +$3 bounty) |
+    | 🌈 | Chaos Deck | Every card in both decks starts with a random enhancement |
+    | 🎰 | Lucky Sevens | Every scoring 7 gives +7 Mult |
+    | 🧛 | Vampire Bites | The clash winner heals half the damage they dealt, up to their starting LP |
+
+  Active modifiers show on the VS screen and as icons under the round box (hover for what they do).
 - **VS screen, then pick a free starter monster** (1 of 3 commons from your unlocked pool).
-- **A round (90 s):** 4 hands, 3 discards, 8 cards in hand. Pick up to 5 cards and play them. Each hand scores
+- **A round (90 s by default):** 4 hands, 3 discards, 8 cards in hand. Pick up to 5 cards and play them. Each hand scores
   Chips × Mult and adds to your ATK. Your rival's ATK climbs live at the top of the screen, and when they lock in
   you're told what you have to beat.
 - **The clash:** both ATKs race up side by side, CLASH!, then:
@@ -34,7 +57,7 @@ Two players only. There is no single-player mode.
 - **Heart of the Cards:** fills from damage taken (1% per 20 LP), lost clashes (+10%) and gremlin hits (+8%).
   When it's full, **BELIEVE**: the best possible 5-card hand in your hand plus your draw pile is pulled into
   your hand, pre-selected, and scores ×2 Mult (×4 with Destiny Dragon). Your rival is told, ominously.
-- **Starting LP:** 4,000 each.
+- **Starting LP:** 4,000 each (2,000–8,000 in a room lobby).
 
 ### Monsters (55)
 

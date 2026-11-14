@@ -235,6 +235,69 @@ b.c, b.m, b.x, b.g { font-weight: 700; }
 .waiting-mons { display: flex; gap: 10px; }
 .waiting-mons .lm { width: 64px; height: 64px; animation: hop 1.2s ease-in-out infinite; animation-delay: var(--d); }
 
+/* the duel lobby: players, house rules, start */
+.lobby2 { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 18px 16px 30px; max-width: 980px; margin: 0 auto; text-align: center; }
+.lb-title { font-family: 'BC Digits', 'Bangers'; font-size: clamp(40px, 7vw, 64px); margin: 0; color: var(--gold); -webkit-text-stroke: 3px var(--ink); paint-order: stroke fill; text-shadow: 0 5px 0 var(--ink); letter-spacing: .05em; line-height: 1; transform: rotate(-2deg); }
+.lb-hdr { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: center; }
+.lb-code { display: flex; flex-direction: column; align-items: center; line-height: 1; }
+.lb-code small { color: #cdb8e6; font-size: 13px; }
+.lb-code b { font-family: 'BC Digits', 'Bangers'; font-size: 54px; color: var(--gold); -webkit-text-stroke: 3px var(--ink); paint-order: stroke fill; text-shadow: 0 5px 0 var(--ink); letter-spacing: .1em; }
+.lb-share { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.lb-players { display: flex; align-items: center; justify-content: center; gap: 14px; width: 100%; }
+.lb-p { flex: 1; max-width: 300px; min-height: 170px; background: var(--panel); border: 3px solid var(--line); border-radius: 20px; padding: 12px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.lb-p.ok { border-color: var(--green); box-shadow: 0 0 18px rgba(62, 207, 110, .35); }
+.lb-p.empty { border-style: dashed; justify-content: center; }
+.lb-p small { color: #cdb8e6; font-size: 13px; }
+.lb-p b { font-size: 18px; }
+.lb-av { width: 86px; height: 86px; animation: hop 1.6s ease-in-out infinite; }
+.lb-st { margin-top: 4px; font-weight: 800; font-size: 14px; padding: 3px 12px; border-radius: 999px; background: rgba(255,255,255,.1); }
+.lb-p.ok .lb-st { background: var(--green); color: #08240f; }
+.lb-inv { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 6px; }
+.lb-vs { font-family: 'BC Digits', 'Bangers'; font-size: 54px; color: var(--mult); -webkit-text-stroke: 3px var(--ink); paint-order: stroke fill; transform: rotate(-8deg); }
+.lb-rules { width: 100%; text-align: left; display: flex; flex-direction: column; gap: 12px; overflow: visible; }
+.lb-rules h3 { justify-content: space-between; }
+.lb-who { font-size: 13px; font-weight: 700; color: #cdb8e6; }
+.lb-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: space-between; }
+.lb-lbl { font-weight: 800; font-size: 16px; display: flex; flex-direction: column; }
+.lb-lbl small { font-weight: 600; font-size: 12px; color: #cdb8e6; }
+.lb-quick { display: flex; gap: 6px; flex-wrap: wrap; }
+.seg { display: flex; background: rgba(0,0,0,.3); border-radius: 14px; padding: 4px; gap: 4px; flex-wrap: wrap; }
+.segb { font: 800 16px 'BC Digits', Fredoka, sans-serif; color: #e6d6f7; background: transparent; border: 0; border-radius: 10px; padding: 7px 12px; cursor: pointer; min-width: 58px; }
+.segb:hover { background: rgba(255,255,255,.1); }
+.segb.on { background: var(--gold); color: #3a2405; box-shadow: 0 3px 0 #c49413; }
+.modgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.modt { display: flex; align-items: center; gap: 10px; text-align: left; font: inherit; color: inherit; background: rgba(255,255,255,.06); border: 2px solid var(--line); border-radius: 14px; padding: 8px 10px; cursor: pointer; transition: transform .12s, background .12s, border-color .12s; }
+.modt:hover { transform: translateY(-2px); background: rgba(255,255,255,.1); }
+.modt .mi { font-size: 28px; width: 38px; text-align: center; flex: none; filter: grayscale(.85) opacity(.6); transition: filter .15s, transform .2s; }
+.modt .mt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.modt .mt b { font-size: 15px; }
+.modt .mt small { font-size: 12px; color: #cdb8e6; line-height: 1.25; }
+.modt .mk { font-weight: 900; font-size: 12px; padding: 3px 8px; border-radius: 999px; background: rgba(0,0,0,.35); color: #9a88ad; flex: none; }
+.modt.on { background: rgba(255, 207, 58, .14); border-color: var(--gold); }
+.modt.on .mi { filter: none; transform: scale(1.15) rotate(-6deg); }
+.modt.on .mk { background: var(--gold); color: #3a2405; }
+.lb-rules.ro .modt, .lb-rules.ro .segb { cursor: default; }
+.lb-rules.ro .modt:hover { transform: none; }
+.lb-est { font-weight: 800; color: var(--gold); text-align: center; font-size: 15px; }
+.lb-est span { color: #cdb8e6; font-weight: 600; }
+.lb-foot { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+/* active modifiers, in the duel sidebar and on the VS intro */
+.modrow { display: flex; flex-wrap: wrap; gap: 4px; }
+.modchip { font-size: 18px; width: 30px; height: 30px; display: grid; place-items: center; background: rgba(255, 207, 58, .15); border: 1px solid rgba(255, 207, 58, .5); border-radius: 9px; cursor: help; }
+.vsrules { position: absolute; left: 50%; bottom: 7vh; transform: translateX(-50%); display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; width: min(900px, 94vw); }
+.vsrules span { background: rgba(0,0,0,.55); border: 2px solid var(--line); border-radius: 999px; padding: 5px 12px; font-weight: 800; font-size: 15px; }
+.vsrules span.on { border-color: var(--gold); color: var(--gold); }
+@media (max-width: 600px) {
+  .lb-players { gap: 6px; }
+  .lb-p { min-height: 140px; padding: 8px; }
+  .lb-av { width: 60px; height: 60px; }
+  .lb-vs { font-size: 36px; }
+  .lb-p.empty .waiting-mons .lm { width: 40px; height: 40px; }
+  .modgrid { grid-template-columns: 1fr; }
+  .segb { min-width: 0; padding: 7px 9px; font-size: 14px; }
+  .lb-code b { font-size: 42px; }
+}
+
 /* ---------------- duel ---------------- */
 .duel { display: grid; grid-template-columns: minmax(190px, 240px) 1fr minmax(96px, 128px); grid-template-rows: auto 1fr; gap: 10px; padding: 10px; height: 100%; }
 .opp { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; background: var(--panel); border: 2px solid var(--line); border-radius: 20px; padding: 8px 12px; min-height: 76px; position: relative; }

@@ -10,6 +10,7 @@ import { Social, DuelLink, Matchmaker, genRoomCode, cleanRoom, cleanFriend } fro
 import { Duel, BotLink } from './duel.js';
 import { toast, modal, tip, monTipHTML, avatarOf, copyText } from './ui.js';
 import { RULES } from './engine.js';
+import { MODS, LP_OPTS, TIME_OPTS, DEFAULT_CFG, normCfg, estimate, isStandard } from './rules.js';
 
 const params = new URLSearchParams(location.search);
 const App = { profile: null, social: null, duel: null, link: null, mm: null, screen: null };
@@ -202,32 +203,158 @@ function shareLink(url, text) {
 // ================================================================ rooms
 const helloOf = (extra = {}) => { const d = P(); return { name: d.name, av: d.avatar, code: d.code, lvl: d.level, title: TITLES[d.title], ...extra }; };
 function cleanupNet() {
+  leaveLobby();
   if (App.link) { App.link.close(); App.link = null; }
   if (App.mm) { App.mm.stop(); App.mm = null; }
 }
 function createRoom(inviteFriend) {
   cleanupNet();
   const room = genRoomCode();
-  const seed = (Math.random() * 2 ** 31) | 0;
-  const link = App.link = new DuelLink(App.social.mesh, room, 'host', helloOf({ seed })).start();
-  link.on('open', rival => startDuel(link, 'host', rival, seed));
-  App.screen = 'lobby';
-  App.social.setStatus('lobby');
-  const url = `${base()}?room=${room}`;
-  const online = Object.entries(P().friends).filter(([c]) => App.social.isOnline(c) && (App.social.presence[c] || {}).status !== 'dueling');
-  const app = $('#app'); app.innerHTML = '';
-  app.append(h('div.screen', h('div.lobby',
-    h('p.tagline', inviteFriend ? `Waiting for ${inviteFriend.name} to accept…` : 'Your duel room code'),
-    h('div.roomcode', room),
-    h('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' } },
-      h('button.btn.blue', { onclick: () => { copyText(room); toast('Code copied!', { ms: 1500 }); } }, '📋 Copy code'),
-      h('button.btn.purple', { onclick: () => shareLink(url, 'Duel me in Battle Cards!') }, '🔗 Share invite link')),
-    online.length ? h('div.panel', { style: { width: 'min(420px, 94vw)' } }, h('h3', 'Invite an online friend'),
-      ...online.map(([c, f]) => h('div.frow', h('div.fav', { html: monsterSVG(avatarOf(f.av, c)) }), h('div.fi', h('b', f.name)), h('button.btn.small.gold', { onclick: e => { App.social.invite(c, room); e.target.textContent = 'Sent!'; e.target.disabled = true; sfx.chime(); } }, '⚔️ Invite')))) : null,
-    h('div.waiting-mons', ...['gary', 'chomp', 'meatball'].map((id, i) => h('div.lm', { style: { '--d': i * 0.15 + 's' }, html: monsterSVG(MON_BY_ID[id].art) }))),
-    h('p', { style: { color: '#cdb8e6' } }, 'Waiting for a challenger… (your monsters are stretching)'),
-    h('button.btn.ghost', { onclick: () => { cleanupNet(); showHome(); } }, 'Cancel'))));
+  const link = new DuelLink(App.social.mesh, room, 'host', helloOf()).start();
+  showLobby({ link, role: 'host', room, inviteFriend });
   if (inviteFriend) App.social.invite(inviteFriend.code, room);
+}
+
+// ================================================================ the lobby: house rules, then the duel
+// The host picks starting Life Points, the round timer and any of the modifiers (rules.js), even while
+// still waiting for a rival. The guest watches the rules change live and readies up; the host starts.
+// Messages: host -> guest { t: 'cfg', cfg } and { t: 'go', seed, cfg }; guest -> host { t: 'lhello' } and { t: 'lready', on }.
+const cfgWire = c => ({ lp: c.lp, time: c.time, mods: c.mods.slice() });
+function leaveLobby() {
+  const L = App.lobby;
+  if (!L) return;
+  for (const f of L.offs) f();
+  clearInterval(L.helloT);
+  App.lobby = null;
+}
+/** o: { link, role, rival (null while the host waits for one), room, inviteFriend, cfg (guest: last known rules) } */
+function showLobby(o) {
+  leaveLobby();
+  const isHost = o.role === 'host', isBot = o.link instanceof BotLink;
+  const L = App.lobby = { link: o.link, rival: o.rival || null, cfg: normCfg(isHost ? P().lobby : o.cfg), ready: isBot, offs: [], room: o.room || o.link.room };
+  App.link = o.link;
+  App.screen = 'lobby';
+  App.social && App.social.setStatus('lobby');
+  const send = m => L.link.send(m);
+  const sendCfg = () => send({ t: 'cfg', cfg: cfgWire(L.cfg) });
+
+  const onMsg = m => {
+    if (App.lobby !== L) return;
+    if (isHost) {
+      if (m.t === 'lhello') sendCfg();
+      if (m.t === 'lready') { L.ready = !!m.on; if (L.ready) sfx.chime(); paint(); }
+    } else {
+      if (m.t === 'cfg') {
+        const was = JSON.stringify(L.cfg); L.cfg = normCfg(m.cfg); clearInterval(L.helloT);
+        if (was !== JSON.stringify(L.cfg)) { if (L.ready) { L.ready = false; toast('The host changed the rules. Ready up again!', { ms: 1800 }); } sfx.pop(); paint(true); }
+      }
+      if (m.t === 'go') { const cfg = normCfg(m.cfg); leaveLobby(); startDuel(L.link, 'guest', L.rival, m.seed, cfg); }
+    }
+  };
+  const onBye = () => {
+    if (App.lobby !== L) return;
+    if (!isHost) { leaveLobby(); cleanupNet(); showHome(); toast('The host closed the room.'); return; }
+    // the rival left: reopen the same room for someone else
+    toast(`${L.rival ? esc(L.rival.name) : 'Your rival'} left the lobby.`);
+    L.rival = null; L.ready = false;
+    L.link.close();
+    attach(new DuelLink(App.social.mesh, L.room, 'host', helloOf()).start());
+    paint();
+  };
+  const attach = link => {
+    L.link = App.link = link;
+    L.offs.push(link.on('msg', onMsg), link.on('bye', onBye));
+    if (isHost && !isBot) L.offs.push(link.on('open', rival => { if (App.lobby !== L) return; L.rival = rival; L.ready = false; sfx.chime(); FX.confetti(innerWidth / 2, innerHeight * 0.3, 30); sendCfg(); paint(); }));
+  };
+  attach(o.link);
+  if (!isHost) { send({ t: 'lhello' }); L.helloT = setInterval(() => send({ t: 'lhello' }), 3000); }
+  if (isHost && L.rival) sendCfg();
+
+  const change = next => {
+    if (!isHost) { sfx.nope(); toast('Only the host can change the rules', { ms: 1400 }); return; }
+    L.cfg = normCfg({ ...cfgWire(L.cfg), ...next });
+    App.profile.data.lobby = cfgWire(L.cfg); App.profile.save();
+    if (!isBot) L.ready = false;
+    sendCfg();
+    paint(true);
+  };
+  const start = () => {
+    if (!L.rival || !L.ready) return;
+    const seed = (Math.random() * 2 ** 31) | 0, cfg = L.cfg;
+    send({ t: 'go', seed, cfg: cfgWire(cfg) });
+    leaveLobby();
+    startDuel(L.link, 'host', L.rival, seed, cfg);
+  };
+  const leave = () => { leaveLobby(); cleanupNet(); if (App.duel) { App.duel.destroy(); App.duel = null; } showHome(); };
+
+  // ---- the screen
+  const hdr = h('div.lb-hdr'), players = h('div.lb-players'), rules = h('div.lb-rules.panel'), foot = h('div.lb-foot');
+  const app = $('#app'); app.innerHTML = '';
+  app.append(h('div.screen', h('div.lobby2', h('h1.lb-title', 'DUEL LOBBY'), hdr, players, rules, foot)));
+  if (isHost && L.room && !isBot) {
+    const url = `${base()}?room=${L.room}`;
+    hdr.append(
+      h('div.lb-code', h('small', 'Room code'), h('b', L.room)),
+      h('div.lb-share',
+        h('button.btn.small.blue', { onclick: () => { copyText(L.room); toast('Code copied!', { ms: 1500 }); } }, '📋 Copy code'),
+        h('button.btn.small.purple', { onclick: () => shareLink(url, 'Duel me in Battle Cards!') }, '🔗 Share link')));
+  } else hdr.append(h('div.lb-code', h('small', isBot ? 'Practice room' : 'Room'), h('b', isBot ? 'BOT' : L.room || '')));
+
+  const pcard = (info, tag, state, cls = '') => h('div.lb-p' + cls,
+    h('div.lb-av', { html: monsterSVG(avatarOf(info.av, info.code)) }),
+    h('b', info.name), h('small', tag), state ? h('div.lb-st', state) : null);
+  function paint(flash) {
+    if (App.lobby !== L) return;
+    const me = helloOf(), rv = L.rival;
+    // players
+    players.innerHTML = '';
+    const online = isHost && !rv && !isBot ? Object.entries(P().friends).filter(([c]) => App.social.isOnline(c) && (App.social.presence[c] || {}).status !== 'dueling') : [];
+    players.append(
+      pcard(me, `Lv ${me.lvl} · ${me.title || ''}`, isHost ? '👑 HOST' : L.ready ? 'READY ✔' : 'Not ready', isHost ? '.ok' : L.ready ? '.ok' : ''),
+      h('div.lb-vs', 'VS'),
+      rv ? pcard(rv, `Lv ${rv.lvl || 1} · ${rv.title || ''}`, isHost ? (L.ready ? 'READY ✔' : 'Reading the rules…') : '👑 HOST', isHost ? (L.ready ? '.ok' : '') : '.ok')
+        : h('div.lb-p.empty',
+          h('div.waiting-mons', ...['gary', 'chomp', 'meatball'].map((id, i) => h('div.lm', { style: { '--d': i * 0.15 + 's' }, html: monsterSVG(MON_BY_ID[id].art) }))),
+          h('b', o.inviteFriend ? `Waiting for ${o.inviteFriend.name}…` : 'Waiting for a challenger…'),
+          h('small', 'Send them the room code. Pick the rules while you wait!'),
+          online.length ? h('div.lb-inv', ...online.map(([c, f]) => h('button.btn.small.gold', { onclick: e => { App.social.invite(c, L.room); e.target.textContent = `Sent to ${f.name}!`; e.target.disabled = true; sfx.chime(); } }, `⚔️ Invite ${f.name}`))) : null));
+    // rules
+    const c = L.cfg, est = estimate(c);
+    const seg = (label, sub, opts, cur, show, key) => h('div.lb-row',
+      h('div.lb-lbl', label, sub ? h('small', sub) : null),
+      h('div.seg', ...opts.map(v => h('button.segb' + (v === cur ? '.on' : ''), { onclick: () => change({ [key]: v }) }, show(v)))));
+    rules.innerHTML = '';
+    rules.classList.toggle('ro', !isHost);
+    rules.append(
+      h('h3', '📜 House rules', h('span.lb-who', isHost ? 'you pick' : `${rv ? rv.name : 'the host'} picks`)),
+      seg('❤ Starting Life Points', null, LP_OPTS, c.lp, v => fmt(v), 'lp'),
+      seg('⏱ Time per round', `then ${c.shopSec}s in the shop`, TIME_OPTS.map(t => t[0]), c.time, v => v + 's', 'time'),
+      h('div.lb-row', h('div.lb-lbl', `🎲 Modifiers`, h('small', `${c.mods.length} of ${MODS.length} on`)),
+        isHost ? h('div.lb-quick',
+          h('button.btn.small.ghost', { onclick: () => { const pool = MODS.map(m => m.id).sort(() => Math.random() - 0.5); change({ mods: pool.slice(0, 3) }); FX.confetti(innerWidth / 2, innerHeight / 2, 25); } }, '🎲 Surprise me'),
+          h('button.btn.small.ghost', { onclick: () => change({ mods: MODS.map(m => m.id) }) }, '🤪 ALL OF THEM'),
+          h('button.btn.small.ghost', { onclick: () => change({ ...DEFAULT_CFG }) }, '↺ Standard')) : null),
+      h('div.modgrid', ...MODS.map(m => {
+        const on = c.mods.includes(m.id);
+        return h('button.modt' + (on ? '.on' : ''), { onclick: () => change({ mods: on ? c.mods.filter(x => x !== m.id) : [...c.mods, m.id] }) },
+          h('div.mi', m.icon), h('div.mt', h('b', m.name), h('small', m.desc)), h('div.mk', on ? 'ON' : 'OFF'));
+      })),
+      h('div.lb-est', `≈ ${est.rounds} rounds · about ${est.mins} min`, est.mins > 30 ? h('span', ' (a long one!)') : null, isStandard(c) ? h('span', ' · standard rules') : null));
+    if (flash) rules.animate([{ boxShadow: '0 0 0 4px #ffd43b' }, { boxShadow: '0 0 0 0 transparent' }], { duration: 600 });
+    // the big button
+    foot.innerHTML = '';
+    if (isHost) {
+      const can = rv && L.ready;
+      const b = h('button.btn.big.gold', { onclick: start, disabled: !can }, can ? '⚔️ START THE DUEL!' : rv ? `Waiting for ${rv.name} to ready up…` : 'Waiting for a rival…');
+      if (can) b.style.animation = 'wiggle .8s infinite';
+      foot.append(b);
+    } else {
+      foot.append(h('button.btn.big' + (L.ready ? '.green' : '.gold'), { onclick: () => { L.ready = !L.ready; send({ t: 'lready', on: L.ready }); if (L.ready) sfx.chime(); paint(); } },
+        L.ready ? '✔ READY! (tap to wait)' : '✋ I\'M READY'));
+    }
+    foot.append(h('button.btn.ghost', { onclick: leave }, isHost ? 'Close room' : 'Leave'));
+  }
+  paint();
 }
 function challenge(f) { sfx.chime(); createRoom(f); }
 
@@ -244,7 +371,7 @@ function joinRoom(code, invite) {
     h('p#joinmsg', { style: { color: '#cdb8e6' } }, App.social.mesh.up ? 'Knock knock…' : 'Connecting to the message servers…'),
     h('button.btn.ghost', { onclick: () => { cleanupNet(); showHome(); } }, 'Cancel'))));
   const giveUp = setTimeout(() => { if (App.link === link && !link.peer) { cleanupNet(); showHome(); toast(`Nobody answered at room ${code}. Check the code, or they might have left.`); } }, 25000);
-  link.on('open', host => { clearTimeout(giveUp); startDuel(link, 'guest', host, host.seed); });
+  link.on('open', host => { clearTimeout(giveUp); showLobby({ link, role: 'guest', rival: host, room: code }); });
   link.on('full', () => { clearTimeout(giveUp); cleanupNet(); showHome(); toast('That duel already has two duelists. Three\'s a crowd!'); });
 }
 
@@ -276,23 +403,23 @@ function quickMatch() {
     h('h1.logo', { style: { fontSize: '70px' } }, h('span', 'SEARCHING…')),
     h('div.waiting-mons', ...['wrangler', 'frog', 'hype', 'disco'].map((id, i) => h('div.lm', { style: { '--d': i * 0.12 + 's' }, html: monsterSVG(MON_BY_ID[id].art) }))),
     msg,
-    h('p', { style: { color: '#cdb8e6', fontSize: '14px', maxWidth: '420px' } }, 'Quick Duel finds anyone else searching right now. Nobody around? Make a room and send the code to a friend instead.'),
+    h('p', { style: { color: '#cdb8e6', fontSize: '14px', maxWidth: '420px' } }, 'Quick Duel finds anyone else searching right now and plays the standard rules. Want modifiers, or nobody around? Make a room and send the code to a friend instead.'),
     h('button.btn.ghost', { onclick: () => { clearInterval(t); cleanupNet(); showHome(); } }, 'Cancel'))));
 }
 
 function devBotDuel() {
   cleanupNet();
   const seed = (Math.random() * 2 ** 31) | 0;
-  const link = App.link = new BotLink(seed + 1);
-  startDuel(link, 'host', { name: 'Test Bot', av: 'gary', code: 'BOT-0000', lvl: 1, title: 'Robot Menace' }, seed);
+  const link = new BotLink(seed + 1);
+  showLobby({ link, role: 'host', rival: { name: 'Test Bot', av: 'gary', code: 'BOT-0000', lvl: 1, title: 'Robot Menace' } });
 }
 
 // ================================================================ the duel
-function startDuel(link, role, rival, seed) {
+function startDuel(link, role, rival, seed, cfg) {
   if (App.duel) { App.duel.destroy(); App.duel = null; }
   App.screen = 'duel';
   const friendly = !!P().friends[rival.code];
-  const duel = App.duel = new Duel(App, { link, role, me: helloOf(), rival, seed, friendly });
+  const duel = App.duel = new Duel(App, { link, role, me: helloOf(), rival, seed, friendly, cfg });
   duel.on('over', r => showResults(duel, r));
   duel.start();
 }
@@ -317,12 +444,15 @@ async function showResults(duel, R) {
   const tryRestart = () => {
     if (!(mine && theirs) || duel.role !== 'host') return;
     const seed = (Math.random() * 2 ** 31) | 0;
-    duel.send({ t: 'restart', seed });
-    restart(seed);
+    duel.send({ t: 'restart', seed, cfg: cfgWire(duel.cfg) });
+    restart(seed, duel.cfg);
   };
-  const restart = seed => { const link = duel.link; duel.destroy(); App.duel = null; startDuel(link, duel.role, rival, seed); };
+  const restart = (seed, cfg) => { const link = duel.link; duel.destroy(); App.duel = null; startDuel(link, duel.role, rival, seed, cfg || duel.cfg); };
+  // back to the lobby to change the rules (the host decides; the guest follows)
+  const toLobby = () => { const link = duel.link; duel.destroy(); App.duel = null; showLobby({ link, role: duel.role, rival, room: link.room, cfg: duel.cfg }); };
+  duel.on('lobby', toLobby);
   duel.on('rematch', () => { theirs = true; sfx.chime(); updRm(); tryRestart(); });
-  duel.on('restart', m => restart(m.seed));
+  duel.on('restart', m => restart(m.seed, m.cfg && normCfg(m.cfg)));
   if (duel.link instanceof BotLink) theirs = true;
   const bar = h('i');
   const xpTxt = h('span', `Lv ${summary.before.level}`);
@@ -340,6 +470,7 @@ async function showResults(duel, R) {
       h('div', h('b', run.stats.destroyed), h('small', 'Cards shredded'))),
     h('div.xpwrap', h('div.xl', xpTxt, h('span', `+${summary.total} XP`)), h('div.bigbar', bar), h('div', { style: { fontSize: '13px', color: '#cdb8e6', marginTop: '6px', textAlign: 'left' } }, summary.xpLines.filter(l => l[1]).map(([l, v]) => `${l} +${v}`).join(' · '))),
     h('div.rbtns', rmBtn,
+      duel.role === 'host' && !R.forfeit ? h('button.btn.blue', { onclick: () => { duel.send({ t: 'lobby' }); toLobby(); } }, '⚙️ Change rules') : null,
       d.packs > 0 ? h('button.btn.purple', { onclick: openLoot }, `🎁 Loot pack (${d.packs})`) : null,
       !isFriend && rival.code && !rival.code.startsWith('BOT') ? h('button.btn.blue', { onclick: e => { const er = App.social.requestFriend(rival.code); toast(er ? esc(er) : 'Friend request sent!'); e.target.disabled = true; } }, '+ Add friend') : null,
       h('button.btn.ghost', { onclick: () => { duel.destroy(); App.duel = null; cleanupNet(); showHome(); } }, 'Menu')),
@@ -443,8 +574,9 @@ function rulesModal() {
   modal(m => {
     m.append(h('h2', '❓ How to duel'), h('div.rules', { html: `
       <p><b>Two duelists, 4,000 Life Points each.</b> Every round you both play poker hands at the same time on your own screens. Biggest total wins the clash, and the loser's Life Points take the hit. Hit zero and you're out. A duel takes about 15 minutes.</p>
+      <p><b>House rules:</b> when you make a room, you pick the starting Life Points (2,000 to 8,000), the time per round (45 to 150 seconds) and any of 10 modifiers in the lobby: Money Rain, Gremlin Frenzy, Glass Cannons, Big Hands, Heart Overdrive, Shredder Party, Boss Rush, Chaos Deck, Lucky Sevens and Vampire Bites. Quick Duel always plays the standard rules.</p>
       <h4>⚔️ A round</h4>
-      <ul><li>You get <b>4 hands</b> and <b>3 discards</b> in 90 seconds. Pick up to 5 cards and play them.</li>
+      <ul><li>You get <b>4 hands</b> and <b>3 discards</b> in 90 seconds (or whatever the room set). Pick up to 5 cards and play them.</li>
       <li>Each hand scores <b class="c">Chips</b> × <b class="m">Mult</b>. Better poker hands start higher, and each scoring card adds its chips.</li>
       <li>Your round <b>ATK</b> is all your hands added up. You can see your rival's climbing live.</li>
       <li>When both of you are done: <b>CLASH!</b> The bigger ATK wins. The more you beat them by, the harder it hits (up to 2.25×). The winner's monsters also shred a card out of the loser's deck. Forever.</li>

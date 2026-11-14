@@ -3,7 +3,8 @@
 import { makeRng, rand, randInt, chance, pick, shuffle, weighted, clamp } from './util.js';
 import { SUIT_KEYS, HANDS, HAND_BY_ID, evalHand, handBase, cardChips, isFace, suitIs, bestFive, cardShort } from './cards.js';
 import { MONSTERS, MON_BY_ID, EDITIONS, STARTER_POOL } from './monsters.js';
-import { ITEMS, ITEM_BY_ID, GREM_BY_ID, ECO_CAP, BOSSES } from './items.js';
+import { ITEMS, ITEM_BY_ID, GREM_BY_ID, ECO_CAP, BOSSES, ENH } from './items.js';
+import { normCfg, hasMod } from './rules.js';
 
 export const RULES = {
   lp: 4000, hands: 4, discards: 3, handSize: 8, monSlots: 5, itemSlots: 2, trapSlots: 2,
@@ -12,9 +13,10 @@ export const RULES = {
 
 // ---------------------------------------------------------------- setup
 export function newRun(seed, opts = {}) {
+  const cfg = normCfg(opts.cfg);
   const run = {
-    seed, rng: makeRng(seed), uid: 1,
-    lp: RULES.lp, gold: RULES.startGold, eco: 0, heart: 0,
+    seed, rng: makeRng(seed), uid: 1, cfg,
+    lp: cfg.lp, gold: RULES.startGold + (hasMod(cfg, 'money') ? 8 : 0), eco: 0, heart: 0,
     round: 0, boss: null, phase: 'pick',
     deck: [], draw: [], hand: [], pile: [],
     levels: Object.fromEntries(HANDS.map(H => [H.id, 1])),
@@ -28,6 +30,7 @@ export function newRun(seed, opts = {}) {
     events: [],
   };
   for (const s of SUIT_KEYS) for (let r = 2; r <= 14; r++) run.deck.push(newCard(run, r, s));
+  if (hasMod(cfg, 'chaos')) { const enh = Object.keys(ENH); for (const c of run.deck) c.enh = pick(run.rng, enh); }
   return run;
 }
 export const newCard = (run, rank, suit, enh = null) => ({ uid: run.uid++, rank, suit, enh, bonus: 0 });
@@ -114,7 +117,7 @@ export function startRound(run, r, boss) {
   run.monsters.forEach(m => { const d = MON_BY_ID[m.id]; d.roundStart && d.roundStart(run, m); });
   drawToFull(run);
 }
-export const handSize = run => Math.max(1, RULES.handSize + passives(run).handSize - (run.boss && run.boss.id === 'tiny' ? 2 : 0));
+export const handSize = run => Math.max(1, RULES.handSize + passives(run).handSize + (hasMod(run.cfg, 'bighands') ? 2 : 0) - (run.boss && run.boss.id === 'tiny' ? 2 : 0));
 
 export function drawToFull(run) {
   const n = handSize(run);
@@ -184,6 +187,7 @@ export function playHand(run, uids, env = {}) {
     for (let t = 0; t < times; t++) {
       if (t > 0) steps.push({ k: 'retrig', uid: c.uid, chips, mult, msg: 'AGAIN!' });
       push('card', c.uid, { chips: cardChips(c) });
+      if (c.rank === 7 && hasMod(run.cfg, 'sevens')) push('card', c.uid, { mult: 7, msg: 'LUCKY 7!' });
       if (c.enh === 'spicy') push('card', c.uid, { mult: 4 });
       if (c.enh === 'gilded') push('card', c.uid, { money: 2 });
       if (c.enh === 'glass') push('card', c.uid, { xmult: 2 });
@@ -260,7 +264,7 @@ export function playHand(run, uids, env = {}) {
 // ---------------------------------------------------------------- Heart of the Cards
 export const heartGain = (run, amount) => {
   const p = passives(run);
-  run.heart = clamp(run.heart + amount * (p.heart ? 2 : 1), 0, 100);
+  run.heart = clamp(run.heart + amount * (p.heart ? 2 : 1) * (hasMod(run.cfg, 'heart') ? 2 : 1), 0, 100);
 };
 /** Believe! Pulls the best possible hand out of your deck into your hand. Returns the uids to select. */
 export function heartActivate(run) {
@@ -342,17 +346,20 @@ export function applyGremlin(run, gid) {
   return r;
 }
 
+/** What a gremlin costs and how long it cools down (seconds) under this duel's rules. */
+export const gremCost = (run, g) => (hasMod(run.cfg, 'frenzy') ? Math.max(1, g.cost - 1) : g.cost);
+export const gremCd = (run, g) => (hasMod(run.cfg, 'frenzy') ? g.cd / 2 : g.cd);
 /** Sending one: pay for it, gain eco. Returns an error string or null. */
 export function canSend(run, gid, now, cds) {
   const g = GREM_BY_ID[gid];
-  if (run.gold < g.cost) return 'Not enough gold';
+  if (run.gold < gremCost(run, g)) return 'Not enough gold';
   if (cds[gid] && cds[gid] > now) return 'Cooling down';
   if (g.once && run.hogSent === run.round) return 'Once per round';
   return null;
 }
 export function paySend(run, gid) {
   const g = GREM_BY_ID[gid];
-  run.gold -= g.cost;
+  run.gold -= gremCost(run, g);
   run.eco = Math.min(ECO_CAP, run.eco + g.eco);
   run.stats.sent++;
   if (g.once) run.hogSent = run.round;
@@ -362,29 +369,30 @@ export function paySend(run, gid) {
 const round10 = x => Math.round(x / 10) * 10;
 export const clashBase = r => 200 + 100 * r;
 /**
- * Works out a clash. a and b: { atk, mons (monster count), traps: ids of traps set }.
- * Returns { winner: 'a'|'b'|null, dmg: {a, b}, used: {a: [], b: []}, ratio, crush }.
+ * Works out a clash. a and b: { atk, mons (monster count), traps: ids of traps set }. cfg: the duel's house rules.
+ * Returns { winner: 'a'|'b'|null, dmg: {a, b}, heal: {a, b}, used: {a: [], b: []}, ratio, crush }.
  */
-export function clashResult(r, boss, a, b) {
-  const bm = boss ? 1.5 : 1, sudden = r >= 10 ? 2 : 1;
-  const base = clashBase(r) * bm * sudden;
+export function clashResult(r, boss, a, b, cfg) {
+  const bm = boss ? 1.5 : 1, sudden = r >= 10 ? 2 : 1, glass = hasMod(cfg, 'glass') ? 2 : 1;
+  const base = clashBase(r) * bm * sudden * glass;
   const used = { a: [], b: [] };
   if (a.atk === b.atk) {
     const d = round10(base * 0.5);
-    return { winner: null, dmg: { a: d, b: d }, used, ratio: 1, crush: 1 };
+    return { winner: null, dmg: { a: d, b: d }, heal: { a: 0, b: 0 }, used, ratio: 1, crush: 1 };
   }
   const W = a.atk > b.atk ? 'a' : 'b', L = W === 'a' ? 'b' : 'a';
   const w = W === 'a' ? a : b, l = W === 'a' ? b : a;
   const ratio = w.atk / Math.max(1, l.atk);
   const crush = clamp(1 + (ratio - 1) * 0.5, 1, 2.25);
-  let dmg = base * crush + 25 * (w.mons || 0) * bm * sudden;
+  let dmg = base * crush + 25 * (w.mons || 0) * bm * sudden * glass;
   if ((w.traps || []).includes('spikes')) { dmg *= 1.5; used[W].push('spikes'); }
   let reflect = 0;
   if ((l.traps || []).includes('banana')) { dmg *= 0.5; used[L].push('banana'); }
   else if ((l.traps || []).includes('cape')) { reflect = dmg * 0.4; dmg -= reflect; used[L].push('cape'); }
-  const out = { winner: W, dmg: { a: 0, b: 0 }, used, ratio, crush: Math.round(crush * 100) / 100 };
+  const out = { winner: W, dmg: { a: 0, b: 0 }, heal: { a: 0, b: 0 }, used, ratio, crush: Math.round(crush * 100) / 100 };
   out.dmg[L] = round10(dmg);
   out.dmg[W] = round10(reflect);
+  if (hasMod(cfg, 'vampire')) out.heal[W] = round10(dmg * 0.5);
   return out;
 }
 
@@ -393,6 +401,9 @@ export function applyClash(run, res, me) {
   const won = res.winner === me, lost = res.winner && !won;
   const dmg = res.dmg[me];
   run.lp -= dmg;
+  // Vampire Bites: the winner drinks back some Life Points, up to what they started the duel with
+  const healed = run.lp > 0 ? Math.max(0, Math.min((res.heal && res.heal[me]) || 0, run.cfg.lp - run.lp)) : 0;
+  run.lp += healed;
   run.stats.dmgTaken += dmg;
   const them = me === 'a' ? 'b' : 'a';
   run.stats.dmgDealt += res.dmg[them];
@@ -402,12 +413,15 @@ export function applyClash(run, res, me) {
   heartGain(run, dmg / 20);
   run.monsters.forEach(m => { const d = MON_BY_ID[m.id]; d.clash && d.clash(run, m, won); });
   // the winner's monsters shred one card out of the loser's deck for good
-  let shred = null;
-  if (lost && run.deck.length > 30) {
-    shred = pick(run.rng, run.deck);
-    destroyCard(run, shred, 'shredded in the clash');
+  // (Shredder Party: three of them)
+  let shred = null, shredN = 0;
+  for (let i = 0; i < (hasMod(run.cfg, 'shredder') ? 3 : 1); i++) {
+    if (!lost || run.deck.length <= 30) break;
+    const c = pick(run.rng, run.deck);
+    destroyCard(run, c, 'shredded in the clash');
+    shred = shred || c; shredN++;
   }
-  return { won, lost, dmg, shred: shred && { uid: shred.uid, rank: shred.rank, suit: shred.suit, enh: shred.enh } };
+  return { won, lost, dmg, healed, shredN, shred: shred && { uid: shred.uid, rank: shred.rank, suit: shred.suit, enh: shred.enh } };
 }
 
 // ---------------------------------------------------------------- money
@@ -428,6 +442,7 @@ export function income(run, clash) {
   if (clash && clash.won) lines.push(['Clash won', 1]);
   else if (clash && clash.lost) lines.push([`Comeback bonus${run.stats.lossStreak > 1 ? ' x' + run.stats.lossStreak : ''}`, 2 + Math.min(3, run.stats.lossStreak - 1)]);
   if (run.boss) lines.push(['Boss round bounty', 3]);
+  if (hasMod(run.cfg, 'money')) lines.push(['💸 Money Rain', 3]);
   const total = lines.reduce((a, l) => a + l[1], 0);
   run.gold += total;
   return { lines, total };

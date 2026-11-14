@@ -16,19 +16,22 @@ import { sfx, setIntensity } from './audio.js';
 import * as FX from './fx.js';
 import { toast, modal, tip, hideTip, popover, closePop, monEl, emptyMon, itemEl, gremTipHTML, avatarOf, monTipHTML, itemTipHTML } from './ui.js';
 import { EMOTES } from './profile.js';
+import { normCfg, hasMod, MOD_BY_ID } from './rules.js';
 
 const now = () => Date.now();
-const bossFor = (seed, r) => (r % 3 === 0 ? E.pickBoss(makeRng(seed * 31 + r * 7919)) : null);
+/** Every 3rd round has a boss (every round with Boss Rush), the same one on both sides. */
+const bossFor = (seed, r, cfg) => (r % 3 === 0 || hasMod(cfg, 'bossrush') ? E.pickBoss(makeRng(seed * 31 + r * 7919)) : null);
 
 export class Duel extends Emitter {
-  /** opts: { link, role: 'host'|'guest', me: hello, rival: hello, seed, friendly } */
+  /** opts: { link, role: 'host'|'guest', me: hello, rival: hello, seed, friendly, cfg: house rules (rules.js) } */
   constructor(app, opts) {
     super();
     this.app = app; this.link = opts.link; this.role = opts.role; this.isHost = opts.role === 'host';
     this.meInfo = opts.me; this.rival = opts.rival; this.seed = opts.seed; this.friendly = !!opts.friendly;
     const prof = app.profile.data;
-    this.run = E.newRun(this.seed, { pool: prof.unlocked.slice() });
-    this.opp = { lp: RULES.lp, atk: 0, hands: RULES.hands, mons: [], traps: 0, heart: 0, ph: 'pick', done: false, ready: false, gold: 0 };
+    this.cfg = normCfg(opts.cfg);
+    this.run = E.newRun(this.seed, { pool: prof.unlocked.slice(), cfg: this.cfg });
+    this.opp = { lp: this.cfg.lp, atk: 0, hands: RULES.hands, mons: [], traps: 0, heart: 0, ph: 'pick', done: false, ready: false, gold: 0 };
     this.phase = 'intro'; this.round = 0; this.deadline = 0;
     this.sel = new Set(); this.busy = false; this.cardEls = new Map(); this.gremQ = []; this.cds = {};
     this.host = { picked: {}, done: {}, atk: {}, info: {}, ready: {}, resolved: 0 };
@@ -94,6 +97,7 @@ export class Duel extends Emitter {
       case 'forfeit': this.rivalLeft(true); break;
       case 'rematch': this.emit('rematch', m); break;
       case 'restart': this.emit('restart', m); break;
+      case 'lobby': this.emit('lobby', m); break;
     }
   }
   connWobble(bad) {
@@ -121,8 +125,8 @@ export class Duel extends Emitter {
   // ================================================================ host: the clock
   hostPhase(ph, extra = {}) {
     const r = ph === 'battle' ? this.round + 1 : this.round;
-    const sec = { pick: RULES.pickSec, battle: RULES.battleSec, shop: RULES.shopSec }[ph] || 0;
-    const m = { t: 'phase', ph, r, ms: sec * 1000, boss: ph === 'battle' ? bossFor(this.seed, r) : null, ...extra };
+    const sec = { pick: RULES.pickSec, battle: this.cfg.battleSec, shop: this.cfg.shopSec }[ph] || 0;
+    const m = { t: 'phase', ph, r, ms: sec * 1000, boss: ph === 'battle' ? bossFor(this.seed, r, this.cfg) : null, ...extra };
     this.send(m);
     this.applyPhase(m);
     clearTimeout(this.hostT);
@@ -149,12 +153,12 @@ export class Duel extends Emitter {
     if (!H.done.h) this.finishBattle(true);
     const a = H.info.h || { atk: this.run.atk, mons: this.run.monsters.length, traps: this.run.traps.map(t => t.id) };
     const b = H.info.g || { atk: this.opp.atk || 0, mons: this.opp.mons.length, traps: [] };
-    const res = E.clashResult(this.round, bossFor(this.seed, this.round), a, b);
+    const res = E.clashResult(this.round, bossFor(this.seed, this.round, this.cfg), a, b, this.cfg);
     const m = { t: 'clash', r: this.round, res, atk: { a: a.atk, b: b.atk } };
     this.send(m);
     this.playClash(m);
     H.cdone = {};
-    this.hostT = this.later(() => { if (!this.over && this.phase !== 'shop') this.hostPhase('shop'); }, RULES.clashSec * 1000 + 4000);
+    this.hostT = this.later(() => { if (!this.over && this.phase !== 'shop') this.hostPhase('shop'); }, RULES.clashSec * 1000 + 8000);
   }
 
   // ================================================================ phases (both sides)
@@ -183,7 +187,7 @@ export class Duel extends Emitter {
     const left = Math.max(0, this.deadline - now());
     const t = $('#timer', this.root);
     if (t) {
-      const total = (this.phase === 'battle' ? RULES.battleSec : this.phase === 'shop' ? RULES.shopSec : RULES.pickSec) * 1000;
+      const total = (this.phase === 'battle' ? this.cfg.battleSec : this.phase === 'shop' ? this.cfg.shopSec : RULES.pickSec) * 1000;
       t.style.setProperty('--p', clamp(left / total, 0, 1));
       const s = Math.ceil(left / 1000);
       t.querySelector('span').textContent = this.phase === 'clash' || this.phase === 'intro' ? '⚔' : s;
@@ -194,7 +198,7 @@ export class Duel extends Emitter {
     // music speeds up when time is short or you're in danger
     let inten = 0;
     if (this.phase === 'battle' && !this.run.done) inten += left < 15000 ? 1 : 0.3;
-    if (this.run.lp < RULES.lp * 0.3) inten += 0.7;
+    if (this.run.lp < this.cfg.lp * 0.3) inten += 0.7;
     setIntensity(inten);
     if (left <= 0) {
       if (this.phase === 'battle' && !this.run.done && !this.busy) this.finishBattle(true);
@@ -231,7 +235,7 @@ export class Duel extends Emitter {
   renderOpp() {
     const el = $('#opp', this.root); if (!el) return;
     const o = this.opp, rv = this.rival;
-    const lpPct = clamp(o.lp / RULES.lp, 0, 1) * 100;
+    const lpPct = clamp(o.lp / this.cfg.lp, 0, 1) * 100;
     el.innerHTML = '';
     const av = h('div.oav#oppav', { html: monsterSVG(avatarOf(rv.av, rv.code)) });
     const status = this.phase === 'battle' ? (o.done ? 'DONE ✔' : 'Battling…') : this.phase === 'shop' ? (o.ready ? 'READY ✔' : 'Shopping…') : this.phase === 'pick' ? 'Picking…' : '';
@@ -249,11 +253,12 @@ export class Duel extends Emitter {
   renderSide() {
     const el = $('#side', this.root); if (!el) return;
     const r = this.run;
-    const lpPct = clamp(r.lp / RULES.lp, 0, 1) * 100;
-    const boss = r.boss && this.phase === 'battle' ? r.boss : (this.phase === 'shop' && bossFor(this.seed, this.round + 1));
+    const lpPct = clamp(r.lp / this.cfg.lp, 0, 1) * 100;
+    const boss = r.boss && this.phase === 'battle' ? r.boss : (this.phase === 'shop' && bossFor(this.seed, this.round + 1, this.cfg));
     el.innerHTML = '';
     el.append(...[
       h('div.roundbox', h('div', h('div.rnd', this.phase === 'shop' ? 'SHOP' : `ROUND ${this.round || 1}`), h('div', { style: { fontSize: '12px', color: '#cdb8e6' } }, this.round >= 10 ? '☠ SUDDEN DEATH x2' : boss && this.phase === 'battle' ? 'BOSS CLASH x1.5' : 'Clash at 0:00')), h('div.timer#timer', h('span', '90'))),
+      this.cfg.mods.length ? h('div.modrow', ...this.cfg.mods.map(id => tip(h('span.modchip', MOD_BY_ID[id].icon), () => `<div class="tn">${MOD_BY_ID[id].icon} ${MOD_BY_ID[id].name}</div><div class="desc">${MOD_BY_ID[id].desc}</div>`))) : null,
       boss ? h('div.bossbox', h('div.bav', { html: monsterSVG(BOSS_BY_ID[boss.id].art) }), h('div', h('b', (this.phase === 'shop' ? 'NEXT: ' : '') + BOSS_BY_ID[boss.id].name), h('span', { html: bossDesc(boss) }))) : null,
       h('div.handname#handname', h('div.hn', this.phase === 'battle' ? 'Pick cards' : this.phase === 'shop' ? 'Shop time!' : '…'), h('div.hl', '')),
       h('div.cxm', h('div.box.chips#chips', '0'), h('span.times', '×'), h('div.box.mult#mult', '0')),
@@ -344,7 +349,7 @@ export class Duel extends Emitter {
     el.append(h('h4', 'GREMLIN GATE'), h('div.ecoline#ecoline', `eco +$${fmtMult(this.run.eco)}/round`));
     for (const g of GREMLINS) {
       const b = h('button.gbtn', { 'data-g': g.id, onclick: e => this.sendGremlin(g.id, e.currentTarget) },
-        h('div.ga', { html: monsterSVG(g.art) }), h('div.gn', g.name), h('div.gc', '$' + g.cost), h('div.cd', { style: { transform: 'scaleY(0)' } }));
+        h('div.ga', { html: monsterSVG(g.art) }), h('div.gn', g.name), h('div.gc', '$' + E.gremCost(this.run, g)), h('div.cd', { style: { transform: 'scaleY(0)' } }));
       tip(b, () => gremTipHTML(g.id));
       el.append(b);
     }
@@ -356,8 +361,8 @@ export class Duel extends Emitter {
     for (const b of el.querySelectorAll('.gbtn')) {
       const g = GREM_BY_ID[b.dataset.g];
       const cdLeft = Math.max(0, (this.cds[g.id] || 0) - now());
-      b.disabled = !can || this.run.gold < g.cost || cdLeft > 0 || (g.once && this.run.hogSent === this.round);
-      b.querySelector('.cd').style.transform = `scaleY(${cdLeft / (g.cd * 1000)})`;
+      b.disabled = !can || this.run.gold < E.gremCost(this.run, g) || cdLeft > 0 || (g.once && this.run.hogSent === this.round);
+      b.querySelector('.cd').style.transform = `scaleY(${cdLeft / (E.gremCd(this.run, g) * 1000)})`;
     }
     const gold = $('#gold', this.root); if (gold && gold.textContent !== '$' + this.run.gold) gold.textContent = '$' + this.run.gold;
   }
@@ -477,7 +482,8 @@ export class Duel extends Emitter {
       h('div.vs',
         h('div.side-p.l', h('div.bigav', { html: monsterSVG(avatarOf(me.av, me.code)) }), h('div.pn', me.name), h('div', `Lv ${me.lvl} · ${me.title || ''}`)),
         h('div.vsword', 'VS'),
-        h('div.side-p.r', h('div.bigav', { html: monsterSVG(avatarOf(rv.av, rv.code)) }), h('div.pn', rv.name), h('div', `Lv ${rv.lvl || 1} · ${rv.title || ''}`), rec ? h('div', { style: { color: '#ffd43b', fontWeight: 700 } }, `Your record: ${rec.w}–${rec.l}`) : null)));
+        h('div.side-p.r', h('div.bigav', { html: monsterSVG(avatarOf(rv.av, rv.code)) }), h('div.pn', rv.name), h('div', `Lv ${rv.lvl || 1} · ${rv.title || ''}`), rec ? h('div', { style: { color: '#ffd43b', fontWeight: 700 } }, `Your record: ${rec.w}–${rec.l}`) : null)),
+      h('div.vsrules', h('span', `❤ ${fmt(this.cfg.lp)} LP`), h('span', `⏱ ${this.cfg.battleSec}s rounds`), ...this.cfg.mods.map(id => h('span.on', `${MOD_BY_ID[id].icon} ${MOD_BY_ID[id].name}`))));
     document.body.append(ov);
     const [l, vs, r] = ov.querySelectorAll('.side-p.l, .vsword, .side-p.r');
     l.animate([{ transform: 'translateX(-120vw) rotate(-20deg)' }, { transform: 'translateX(0) rotate(0)' }], { duration: 500, easing: 'cubic-bezier(.2,1.4,.4,1)' });
@@ -533,7 +539,7 @@ export class Duel extends Emitter {
     E.startRound(this.run, this.round, boss);
     this.opp.done = false; this.opp.atk = 0; this.opp.ready = false; this.opp.ph = 'battle'; this.opp.hands = RULES.hands;
     this.rivalDoneShown = false;
-    FX.setBgMood(this.run.lp < RULES.lp * 0.3 ? 'danger' : 'battle');
+    FX.setBgMood(this.run.lp < this.cfg.lp * 0.3 ? 'danger' : 'battle');
     const pz = $('#play', this.root); pz.innerHTML = '';
     this.renderAll();
     this.layoutHand();
@@ -770,7 +776,7 @@ export class Duel extends Emitter {
     if (err) { sfx.nope(); return; }
     E.paySend(this.run, gid);
     const g = GREM_BY_ID[gid];
-    this.cds[gid] = now() + g.cd * 1000;
+    this.cds[gid] = now() + E.gremCd(this.run, g) * 1000;
     const id = Math.random().toString(36).slice(2, 9);
     const twice = E.passives(this.run).gremlinTwice;
     this.pendingGrem.set(id, gid);
@@ -781,7 +787,7 @@ export class Duel extends Emitter {
     // our gremlin dashes up to the rival
     const from = FX.centerOf(btn), to = FX.centerOf($('#oppav', this.root) || btn);
     this.runner(g.art, from, to, 650).then(() => { FX.stars(to[0], to[1], 6); sfx.bonk(); });
-    FX.floatAt($('#gold', this.root), `-$${g.cost}`, 'g');
+    FX.floatAt($('#gold', this.root), `-$${E.gremCost(this.run, g)}`, 'g');
     $('#ecoline', this.root).textContent = `eco +$${fmtMult(this.run.eco)}/round`;
     this.renderSide(); this.updateGate();
   }
@@ -874,7 +880,7 @@ export class Duel extends Emitter {
       el && FX.floatAt(el, 'HIT!', 'm');
       this.run.stats.hits = (this.run.stats.hits || 0) + 1;
     } else if (m.res === 'blocked') { el && FX.floatAt(el, m.by === 'zapper' ? 'ZAPPED' : 'BLOCKED', 'k'); sfx.bonk(); }
-    else if (m.res === 'miss') { this.run.gold += g.cost; el && FX.floatAt(el, 'too late, refunded', 'k'); }
+    else if (m.res === 'miss') { this.run.gold += E.gremCost(this.run, g); el && FX.floatAt(el, 'too late, refunded', 'k'); }
     else if (m.res === 'reflect') {
       FX.shout('IT CAME BACK!', { color: '#c86bff', size: 64, sub: 'Their Boomerang Box sent your gremlin home' });
       this.gremQ.push({ t: 'grem', id: 'refl' + m.id, g: gid, reflected: true }); this.drainGrem();
@@ -928,6 +934,9 @@ export class Duel extends Emitter {
     const out = E.applyClash(this.run, res, me);
     const theirLpBefore = this.opp.lp;
     this.opp.lp -= res.dmg[them];
+    // the rival's side runs the same heal rule (applyClash) on their screen
+    const theirHeal = this.opp.lp > 0 ? Math.max(0, Math.min((res.heal && res.heal[them]) || 0, this.cfg.lp - this.opp.lp)) : 0;
+    this.opp.lp += theirHeal;
     const won = res.winner === me, lost = res.winner === them;
     this.lastClash = { won, lost, out };
     const close = res.winner && Math.min(myAtk, theirAtk) >= 0.88 * Math.max(myAtk, theirAtk);
@@ -939,9 +948,9 @@ export class Duel extends Emitter {
       h('div.cl-av', { html: monsterSVG(avatarOf(info.av, info.code)) }),
       h('div.cl-name', info.name),
       h('div.cl-atk', '0'),
-      h('div.lpbox.cl-lp', h('div.lpnum', h('small', 'LP'), h('span.lpv', fmt(Math.max(0, lpBefore)))), h('div.lpbar', h('i.ghost', { style: { width: clamp(lpBefore / RULES.lp, 0, 1) * 100 + '%' } }), h('i.real', { style: { width: clamp(lpBefore / RULES.lp, 0, 1) * 100 + '%' } }))),
+      h('div.lpbox.cl-lp', h('div.lpnum', h('small', 'LP'), h('span.lpv', fmt(Math.max(0, lpBefore)))), h('div.lpbar', h('i.ghost', { style: { width: clamp(lpBefore / this.cfg.lp, 0, 1) * 100 + '%' } }), h('i.real', { style: { width: clamp(lpBefore / this.cfg.lp, 0, 1) * 100 + '%' } }))),
       h('div.cl-dmg', ''));
-    const myLpBefore = this.run.lp + res.dmg[me];
+    const myLpBefore = this.run.lp + res.dmg[me] - (out.healed || 0);
     const L = side('left', meInfo, myAtk, this.run.lp, myLpBefore);
     const R = side('right', rv, theirAtk, this.opp.lp, theirLpBefore);
     const LM = h('div.cl-mons.left', ...this.run.monsters.map(x => h('div.cl-mon', { html: monsterSVG(MON_BY_ID[x.id].art) })));
@@ -1023,22 +1032,30 @@ export class Duel extends Emitter {
         await sleep(450);
         await this.tearCard(card);
         FX.textPop(innerWidth / 2, innerHeight / 2 - 80, `RIP ${cardShort(fake)}`, '#fff', 40);
-        note.textContent = lost ? `Your ${cardShort(fake)} was shredded out of your deck. (${fake.rank === 14 ? 'It was an Ace. Ouch.' : 'It had a family.'})` : `Your monsters shredded their ${'card'}! 🧻`;
+        note.textContent = lost ? (out.shredN > 1 ? `Your ${cardShort(fake)} and ${out.shredN - 1} more card${out.shredN > 2 ? 's' : ''} got shredded out of your deck. Shredder Party!` : `Your ${cardShort(fake)} was shredded out of your deck. (${fake.rank === 14 ? 'It was an Ace. Ouch.' : 'It had a family.'})`) : `Your monsters shredded their ${hasMod(this.cfg, 'shredder') ? 'cards' : 'card'}! 🧻`;
       }
     }
     // ---- damage
-    const lpAnim = async (sideEl, before, dmg) => {
+    const lpAnim = async (sideEl, before, dmg, heal = false) => {
       if (!dmg) return;
       const after = before - dmg;
-      sideEl.querySelector('.cl-dmg').textContent = `-${fmt(dmg)}`;
+      sideEl.querySelector('.cl-dmg').textContent = heal ? `+${fmt(-dmg)} 🧛` : `-${fmt(dmg)}`;
+      sideEl.querySelector('.cl-dmg').style.color = heal ? '#7dffa8' : '';
       sideEl.querySelector('.cl-dmg').animate([{ transform: 'scale(3)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }], { duration: 300, easing: 'cubic-bezier(.2,1.6,.4,1)' });
-      sideEl.querySelector('.i.real, i.real').style.width = clamp(after / RULES.lp, 0, 1) * 100 + '%';
-      sideEl.querySelector('i.ghost').style.width = clamp(after / RULES.lp, 0, 1) * 100 + '%';
+      sideEl.querySelector('.i.real, i.real').style.width = clamp(after / this.cfg.lp, 0, 1) * 100 + '%';
+      sideEl.querySelector('i.ghost').style.width = clamp(after / this.cfg.lp, 0, 1) * 100 + '%';
       const lv = sideEl.querySelector('.lpv');
       const t0 = performance.now();
       await new Promise(done => { let k0 = -1; const f = t => { const k = clamp((t - t0) / 900, 0, 1); lv.textContent = fmt(Math.max(0, before - dmg * k)); const kk = Math.floor(k * 20); if (kk !== k0) { k0 = kk; sfx.lpTick(kk); } if (k < 1) frame(f); else done(); }; frame(f); });
     };
     await Promise.all([lpAnim(L, myLpBefore, res.dmg[me]), lpAnim(R, theirLpBefore, res.dmg[them])]);
+    const myHeal = out.healed || 0;
+    if (myHeal || theirHeal) {
+      await sleep(350);
+      sfx.chime();
+      FX.shout('VAMPIRE BITE!', { color: '#ff5d8f', size: 80, sub: `${myHeal ? 'You drink' : rv.name + ' drinks'} ${fmt(myHeal || theirHeal)} Life Points back. Slurp.`, ms: 1100 });
+      await Promise.all([lpAnim(L, myLpBefore - res.dmg[me], -myHeal, true), lpAnim(R, theirLpBefore - res.dmg[them], -theirHeal, true)]);
+    }
     if (won) { sfx.victory(); FX.confetti(innerWidth * 0.25, innerHeight * 0.3, 50); }
     else if (lost) { sfx.fizzle(); }
     this.renderOpp();
@@ -1051,7 +1068,7 @@ export class Duel extends Emitter {
     this.clearCards();
     this.myReady = false;
     this.opp.ready = false; this.opp.ph = 'shop';
-    FX.setBgMood(this.run.lp < RULES.lp * 0.3 ? 'danger' : 'shop');
+    FX.setBgMood(this.run.lp < this.cfg.lp * 0.3 ? 'danger' : 'shop');
     const inc = E.income(this.run, this.lastClash || {});
     if (this.run.lp < this.opp.lp) this.run.freeRerolls += 1;   // trailing: a free reroll
     E.rollShop(this.run);
@@ -1317,9 +1334,10 @@ export class Duel extends Emitter {
 
 /** Developer-only stand-in rival (?devbot in the address): plays its own rounds in this tab, for testing the duel flow. */
 export class BotLink extends Emitter {
-  constructor(seed) {
+  constructor(seed, cfg) {
     super();
-    this.run = E.newRun(seed);
+    this.seed = seed;
+    this.run = E.newRun(seed, { cfg });
     this.isLost = false;
     this.round = 0;
   }
@@ -1338,8 +1356,8 @@ export class BotLink extends Emitter {
         while (r.hands > 0 && this.round === m.r) {
           await sleep(3500 + Math.random() * 2500);
           if (this.round !== m.r) return;
-          if (r.gold >= 3 && Math.random() < 0.5) { const g = pick(makeRng(Date.now()), GREMLINS.filter(x => x.cost <= r.gold && !x.once)); E.paySend(r, g.id); this.out({ t: 'grem', id: 'bot' + Date.now(), g: g.id }); }
-          const res = E.playHand(r, E.botChooseHand(r), { oppLp: 4000 });
+          if (r.gold >= 3 && Math.random() < 0.5) { const g = pick(makeRng(Date.now()), GREMLINS.filter(x => E.gremCost(r, x) <= r.gold && !x.once)); E.paySend(r, g.id); this.out({ t: 'grem', id: 'bot' + Date.now(), g: g.id }); }
+          const res = E.playHand(r, E.botChooseHand(r), { oppLp: this.run.cfg.lp });
           this.out({ t: 'hand', r: m.r, type: res.type, total: res.total, atk: r.atk, hands: r.hands });
           this.st();
         }
@@ -1355,5 +1373,8 @@ export class BotLink extends Emitter {
     if (m.t === 'grem') { const res = E.applyGremlin(r, m.g); this.out({ t: 'gremr', id: m.id, res: res.res, by: res.by }); }
     if (m.t === 'emote') setTimeout(() => this.out({ t: 'emote', e: 'lol' }), 800);
     if (m.t === 'rematch') this.out({ t: 'rematch' });
+    // the lobby: it always readies up, and starts a fresh run with the host's rules
+    if (m.t === 'cfg') this.out({ t: 'lready', on: true });
+    if (m.t === 'go' || m.t === 'restart') { this.seed++; this.run = E.newRun(this.seed, { cfg: m.cfg }); this.round = 0; }
   }
 }

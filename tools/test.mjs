@@ -5,6 +5,7 @@ import * as E from '../public/js/engine.js';
 import { MONSTERS } from '../public/js/monsters.js';
 import { ITEMS, GREMLINS, BOSSES } from '../public/js/items.js';
 import { makeRng, fmt } from '../public/js/util.js';
+import { MODS, LP_OPTS, normCfg, estimate } from '../public/js/rules.js';
 
 let n = 0, failed = 0;
 function test(name, fn) {
@@ -162,20 +163,22 @@ test('shop and packs', () => {
   assert.ok(E.reroll(run).ok);
   for (let i = 0; i < 200; i++) { const pk = E.openPack(run, 'monpack'); assert.equal(new Set(pk.choices.map(c => c.id)).size, 3); }
 });
-test('whole duels end, and in a sensible number of rounds', () => {
+/** Bot v bot duels under some house rules; returns how many rounds each lasted. */
+function simDuels(cfg, count = 40) {
   const lens = [];
-  for (let s = 1; s <= 40; s++) {
-    const A = E.newRun(s * 3), B = E.newRun(s * 3 + 1);
+  cfg = normCfg(cfg);
+  for (let s = 1; s <= count; s++) {
+    const A = E.newRun(s * 3, { cfg }), B = E.newRun(s * 3 + 1, { cfg });
     for (const run of [A, B]) { run.gold = 4; E.addMonster(run, E.starterChoices(run)[0]); }
     let r = 0;
     while (A.lp > 0 && B.lp > 0 && r < 20) {
       r++;
-      const boss = r % 3 === 0 ? E.pickBoss(makeRng(s + r)) : null;
+      const boss = r % 3 === 0 || cfg.mods.includes('bossrush') ? E.pickBoss(makeRng(s + r)) : null;
       for (const run of [A, B]) {
         E.startRound(run, r, boss);
         while (run.hands > 0) E.playHand(run, E.botChooseHand(run), { oppLp: (run === A ? B : A).lp });
       }
-      const res = E.clashResult(r, boss, { atk: A.atk, mons: A.monsters.length, traps: [] }, { atk: B.atk, mons: B.monsters.length, traps: [] });
+      const res = E.clashResult(r, boss, { atk: A.atk, mons: A.monsters.length, traps: [] }, { atk: B.atk, mons: B.monsters.length, traps: [] }, cfg);
       const ca = E.applyClash(A, res, 'a'), cb = E.applyClash(B, res, 'b');
       for (const [run, c] of [[A, ca], [B, cb]]) {
         E.income(run, c); E.rollShop(run);
@@ -184,9 +187,54 @@ test('whole duels end, and in a sensible number of rounds', () => {
     }
     lens.push(r);
   }
+  return lens;
+}
+test('whole duels end, and in a sensible number of rounds', () => {
+  const lens = simDuels();
   const avg = lens.reduce((a, b) => a + b, 0) / lens.length;
   console.log(`  bot duels last ${Math.min(...lens)}-${Math.max(...lens)} rounds (avg ${avg.toFixed(1)})`);
   assert.ok(avg >= 4 && avg <= 11, 'average duel length ' + avg);
+});
+test('house rules: unknown values fall back to standard', () => {
+  assert.deepEqual(normCfg({ lp: 123, time: 7, mods: ['glass', 'nope', 'glass'] }), { lp: 4000, time: 90, battleSec: 90, shopSec: 40, mods: ['glass'] });
+  assert.equal(normCfg(null).lp, 4000);
+  assert.equal(MODS.length, 10);
+});
+test('house rules: each modifier does its thing', () => {
+  const on = id => ({ mods: [id] });
+  assert.equal(E.newRun(1, { cfg: { lp: 8000 } }).lp, 8000);
+  assert.equal(E.newRun(1, { cfg: on('money') }).gold, E.RULES.startGold + 8);
+  const mr = E.newRun(1, { cfg: on('money') }); assert.ok(E.income(mr, {}).lines.some(l => /Money Rain/.test(l[0])));
+  const fr = E.newRun(1, { cfg: on('frenzy') }), g = GREMLINS.find(x => x.cost > 1);
+  assert.equal(E.gremCost(fr, g), g.cost - 1); assert.equal(E.gremCd(fr, g), g.cd / 2);
+  const a = { atk: 900, mons: 1, traps: [] }, b = { atk: 300, mons: 0, traps: [] };
+  assert.ok(Math.abs(E.clashResult(2, null, a, b, on('glass')).dmg.b - E.clashResult(2, null, a, b).dmg.b * 2) <= 10);
+  const bh = E.newRun(2, { cfg: on('bighands') }); E.startRound(bh, 1, null); assert.equal(bh.hand.length, 10);
+  const hr = E.newRun(3, { cfg: on('heart') }); E.heartGain(hr, 10); assert.equal(hr.heart, 20);
+  const ch = E.newRun(4, { cfg: on('chaos') }); assert.ok(ch.deck.every(c => c.enh));
+  // Lucky Sevens: a pair of 7s scores 14 more Mult
+  const sv = E.newRun(5, { cfg: on('sevens') }), pl = E.newRun(5);
+  for (const run of [sv, pl]) { E.startRound(run, 1, null); const sev = run.deck.filter(c => c.rank === 7).slice(0, 2); run.hand = sev.concat(run.hand.filter(c => c.rank !== 7)).slice(0, 8); }
+  const r1 = E.playHand(sv, sv.hand.filter(c => c.rank === 7).map(c => c.uid)), r2 = E.playHand(pl, pl.hand.filter(c => c.rank === 7).map(c => c.uid));
+  assert.equal(r1.mult - r2.mult, 14);
+  // Shredder Party: three cards gone
+  const sh = E.newRun(6, { cfg: on('shredder') }), n0 = sh.deck.length;
+  const lose = E.clashResult(1, null, { atk: 1, traps: [] }, { atk: 100, traps: [] }, on('shredder'));
+  const out = E.applyClash(sh, lose, 'a'); assert.equal(n0 - sh.deck.length, 3); assert.equal(out.shredN, 3);
+  // Vampire Bites: the winner heals half the damage they dealt, but never past their starting Life Points
+  const vr = E.clashResult(3, null, a, b, on('vampire')); assert.ok(vr.heal.a > 0 && Math.abs(vr.heal.a - vr.dmg.b * 0.5) <= 10);
+  const va = E.newRun(7, { cfg: on('vampire') }); va.lp = 1000; const vo = E.applyClash(va, vr, 'a'); assert.equal(va.lp, 1000 + vr.heal.a); assert.equal(vo.healed, vr.heal.a);
+  const vf = E.newRun(7, { cfg: on('vampire') }); E.applyClash(vf, vr, 'a'); assert.equal(vf.lp, 4000);
+});
+test('house rules: every combination still finishes duels', () => {
+  const report = [];
+  const avg = l => (l.reduce((x, y) => x + y, 0) / l.length).toFixed(1);
+  for (const lp of LP_OPTS) { const l = simDuels({ lp }, 30); report.push(`${lp}: ${avg(l)} (est ${estimate({ lp }).rounds})`); assert.ok(Math.max(...l) < 20); }
+  for (const m of MODS) { const l = simDuels({ mods: [m.id] }, 20); report.push(`${m.id}: ${avg(l)} (est ${estimate({ mods: [m.id] }).rounds})`); assert.ok(Math.max(...l) < 20, m.id); }
+  const allMods = { lp: 8000, mods: MODS.map(m => m.id) };
+  const all = simDuels(allMods, 20); report.push(`all mods at 8000: ${avg(all)} (est ${estimate(allMods).rounds})`);
+  assert.ok(Math.max(...all) < 20);
+  console.log('  avg rounds: ' + report.join(', '));
 });
 test('fmt', () => { assert.equal(fmt(1234567), '1,234,567'); assert.match(fmt(1e13), /e13/); });
 
