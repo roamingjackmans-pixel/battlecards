@@ -87,7 +87,7 @@ function loop() {
       for (let i = 0; i < 10; i++) { const a = i * Math.PI / 5, r = i % 2 ? p.w * 0.45 : p.w; px.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
       px.closePath(); px.fill(); px.strokeStyle = '#24163a'; px.lineWidth = 2; px.stroke();
     } else if (p.kind === 'text') {
-      px.font = `${p.w}px Bangers, Fredoka, sans-serif`; px.textAlign = 'center';
+      px.font = `${p.w}px 'BC Digits', Bangers, Fredoka, sans-serif`; px.textAlign = 'center';
       px.lineWidth = 5; px.strokeStyle = '#24163a'; px.strokeText(p.text, 0, 0);
       px.fillStyle = p.color; px.fillText(p.text, 0, 0);
     } else if (p.kind === 'ring') {

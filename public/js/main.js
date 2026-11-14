@@ -21,6 +21,8 @@ const base = () => location.origin + location.pathname;
 function boot() {
   FX.startBackground($('#bg'));
   FX.initParticles($('#fx'));
+  // load the number font up front so canvas pop-ups (which can't trigger a font load) get it too
+  try { document.fonts.load("40px 'BC Digits'", '0123456789'); document.fonts.load('40px Bangers', 'A'); } catch { }
   App.profile = new Profile();
   const go = () => { unlock(); startMusic(); };
   addEventListener('pointerdown', go, { once: true });

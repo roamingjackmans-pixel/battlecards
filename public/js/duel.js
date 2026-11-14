@@ -702,7 +702,7 @@ export class Duel extends Emitter {
     this.later(() => this.clearCards(), 550);
     const pz = $('#play', this.root);
     pz.innerHTML = '';
-    pz.append(h('div.msg', h('div', { style: { fontFamily: 'Bangers', fontSize: '42px', color: '#ffd43b' } }, `LOCKED IN: ${fmt(this.run.atk)}`),
+    pz.append(h('div.msg', h('div', { style: { fontFamily: "'BC Digits', Bangers", fontSize: '42px', color: '#ffd43b' } }, `LOCKED IN: ${fmt(this.run.atk)}`),
       h('div', this.opp.done ? 'Both locked in. CLASH INCOMING…' : 'Your rival is still playing. Send gremlins to mess them up! 😈')));
     this.renderSide(); this.renderActions();
   }
